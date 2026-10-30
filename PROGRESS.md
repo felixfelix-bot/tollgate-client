@@ -1,3 +1,19 @@
+## Actual CLI recording-only continuation
+
+- Added strict opt-in `tollgate-agent --recording-only`, dedicated new-directory enrollment,
+  typed simulated JSON and durable recording callback; existing offline adapter reused.
+- RED: four actual-binary tests failed before implementation (missing --gate / legacy auto success).
+  GREEN: 3 normal subprocess tests, 4 with test-only SIGKILL checkpoint; separate feature-absence test passes.
+- Full locked/offline persistence, nonproduction-test-harness and no-default-features suites exit 0.
+  Default feature-absence test also passes. Existing unrelated warnings remain.
+- LLVM direct instrumentation of CLI: recording module 156/162 lines (96.30%), 217/250 regions
+  (86.80%), 10/11 functions (90.91%); three normal subprocess tests, no branch coverage.
+  cargo-llvm-cov unavailable; used installed matching LLVM tools instead.
+- No HTTP/payment/funding/device actions, watcher changes or new PR. Trusted clock and local-storage
+  exclusions remain; independent review and real monetary integration are later gates.
+- Usage and threat boundaries: docs/cli-recording.md. Logs: cli-recording-{full,harness,minimal}.log
+  in manager scratch. Process tests use tmpfs, not power-loss durability evidence.
+
 # Offline policy adapter — simulation only
 
 - Added immutable enrolled per-unit caps, fee bound, snapshot digest and freshness interval.

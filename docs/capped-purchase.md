@@ -103,8 +103,8 @@ Order is the contract:
 4. **Observe** — bounded `PollPolicy` (attempts + interval, no unbounded wait,
    no "poll until active"). Polling is skipped only for a proven pre-send
    refusal, where no byte reached the gate.
-5. **Publish** — one evidence file, written temp → fsync → rename → dir fsync
-   into a `0700` directory as `0600`.
+5. **Publish** — one evidence file, written temp → fsync → hard link (never
+   replace) → dir fsync into a `0700` directory as `0600`.
 
 ### Attribution and context limits
 
@@ -113,8 +113,12 @@ mismatch is rejected before network I/O. Both use the supplied source/interface.
 Present session MACs must be colon-separated six-byte hexadecimal addresses;
 changes between baseline and post-state, disagreement with an actual notice MAC,
 or disagreement between notice and session metric yield `Unresolved`. Missing
-identity fields provide no attribution. The notice literal `device-identifier:
-mac` means an identifier **type**, never an actual MAC address.
+identity fields provide no attribution. The notice carries the identifier **type**
+and the address separately: TollGate emits `["device-identifier", "mac",
+"<address>"]`, so the address is read from the third element and the type literal
+`mac` is never treated as an address. The older two-element spelling
+(`["device-identifier", "<address>"]`) is also accepted. A notice that names only
+the type, with no address, is not malformed — it simply provides no attribution.
 
 These checks do not solve races: another purchase may activate the session between
 baseline and POST. There is no purchase-bound session generation, authenticated
@@ -128,7 +132,12 @@ does not persist endpoint/device/offer/baseline provenance. No POST or automatic
 exposure release occurs on replay.
 
 Only the known metrics `milliseconds` and `bytes` are accepted; arbitrary strings
-are refused without copying them into evidence. Allotment is positive and bounded
+are never copied into evidence. An unrecognised unit is not a refusal: a
+well-formed notice in a unit this client cannot interpret is recorded as
+`delivery: unknown` with `outcome_detail: unsupported_metric`, because the gate
+granted and the money may be gone. Structural defects (missing or zero allotment,
+duplicate tags, wrong kind, non-2xx, unparseable body) remain
+`refusal_or_malformed`. Allotment is positive and bounded
 by u64, but neither offer price/quantity matching nor purchased quantity is proven:
 `offer_digest` is an opaque caller label, not a parsed offer. A well-formed notice
 is a gate claim, not proof of correct fulfillment.

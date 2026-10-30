@@ -201,12 +201,31 @@ load-bearing fact for the Android work: discovery, pricing, caps, purchase,
 classification and the Lightning lane all port as-is. Only the cdk wallet needs
 the NDK, and the Lightning lane does not need the wallet.
 
+## Capped purchase: one send, then the truth
+
+`capped_purchase::purchase_once` is the vertical step: read `/session-state`
+(preflight, and refuse if access already exists), send the verified token
+**exactly once** through the bound transport, poll the session a bounded number
+of times, and write one JSON evidence file that contains no bearer bytes.
+
+The rule it enforces: **a grant notice is not access.** Only
+`Verdict::GrantAndSessionActive` — a usable kind-1022 notice *and* an
+independently observed `active` session — reports access. A grant with no session
+is `GrantWithoutSession` (money may be gone, access not obtained); an ambiguous
+or pre-send-refused delivery is `Unresolved` and keeps its exposure.
+
+`RefusedBeforeSend` maps to `Unknown` because `send_validated` already committed
+the irreversible send mark before the transport ran. Releasing that exposure
+needs **manual reconciliation** against the mint (NUT-07); the preflight session
+read is the mitigation that keeps the case rare. See
+[docs/capped-purchase.md](docs/capped-purchase.md).
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);
 the Cashu wallet itself (`cashubtc/cdk`) behind a `Wallet` trait, plus NUT-07
-reconciliation for ambiguous attempts — after the recon verdict from
-`OpenTollGate/tollgate-module-basic-go`.
+automatic reconciliation for ambiguous attempts — after the recon verdict from
+`OpenTollGate/tollgate-module-basic-go`. No shell calls `purchase_once` yet.
 
 ## Test
 

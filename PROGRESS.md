@@ -1,3 +1,37 @@
+## Capped purchase orchestration (2026-10-30)
+
+- `src/capped_purchase.rs` connects the reviewed pieces: `SessionReader` (bounded
+  read-only `GET /session-state` on the same numeric target + interface/source
+  binding + limits, no redirects, no chunked, no read-to-EOF), `ObservingTransport`
+  (`VerifiedBytesTransport` wrapper that forwards once, maps the three-way
+  `SendOutcome` to `DeliveryObservation`, writes a durable per-operation record),
+  and `purchase_once` (ledger-first → baseline → one send → bounded poll → one
+  evidence file).
+- `RefusedBeforeSend` maps to `Unknown`, not to a refusal: `send_validated`
+  commits the irreversible send mark before the transport runs, so a pre-send
+  refusal conservatively retains exposure. The gap is **manual reconciliation**
+  against the mint (NUT-07); the mitigation is the preflight session read, which
+  discovers a down or misrouted gate before any spend. A grant notice alone is
+  never access: only `GrantAndSessionActive` (notice **and** an independently
+  observed `active` session) reports it.
+- RED first, then 11 behaviour-reversion checks, each of which fails the suite and
+  nothing compiles by accident: pre-send refusal→refusal, grant alone→access, no
+  baseline-active refusal, no ledger-first replay check, grant without `metric`,
+  chunked session accepted, evidence leaking bearer bytes, evidence extra key,
+  evidence omitted null key, no polling after send, baseline read error treated
+  as "not active". GREEN: `umask 077; TMPDIR=/dev/shm cargo test --features
+  persistence` → 160 tests pass (12 in `tests/capped_purchase.rs`, 6 in-module);
+  `--no-default-features --features persistence` builds; `cargo fmt --check` and
+  `git diff --check` clean.
+- All transport tests are loopback `TcpListener` only and assert on what the
+  server observed (POST count, GET count, peer address), not on the client's
+  return value. No router, mint, VM or funds were involved.
+- See [docs/capped-purchase.md](docs/capped-purchase.md). Deferred, absent rather
+  than stubbed: exposure release / automatic reconciliation, post-send route
+  re-verification, authenticated clock and snapshot provenance, automatic retry
+  after a proven-unspent reconciliation, multi-operation budgeting, Android
+  execution, and any CLI/JNI activation of `purchase_once`.
+
 ## Ledger storage hardening
 
 - Added stable trusted-ancestry validation and explicit SQLite Unix VFS NOFOLLOW opens; unsafe ledger/auxiliary nodes and stranded enrollment recovery fail closed.

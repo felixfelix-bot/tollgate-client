@@ -13,6 +13,12 @@ pub mod agent;
 pub mod bound_transport;
 #[cfg(feature = "persistence")]
 pub mod budget_store;
+#[cfg(all(
+    feature = "cdk",
+    feature = "persistence",
+    any(target_os = "linux", target_os = "android")
+))]
+pub mod capped_purchase;
 #[cfg(feature = "cdk")]
 pub mod cdk_wallet;
 pub mod discovery;

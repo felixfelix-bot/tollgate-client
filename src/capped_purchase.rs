@@ -5,7 +5,7 @@
 //!
 //! 1. [`SessionReader`] — a bounded, read-only `GET /session-state` against the
 //!    same numeric [`BoundTarget`] + [`NetworkContext`] + [`Limits`] the payment
-//!    POST uses. No redirects, no chunked bodies, no read-to-EOF.
+//!    POST uses. No redirects, no chunked bodies, bounded EOF verification.
 //! 2. [`ObservingTransport`] — a [`VerifiedBytesTransport`] wrapper that forwards
 //!    the verified body to the bound transport exactly once and turns its
 //!    three-way [`SendOutcome`] into the ledger's [`DeliveryObservation`], keeping
@@ -46,6 +46,10 @@
 //! without `allotment` and `metric`, a non-2xx answer, a body that is not kind
 //! 1022, an ambiguous read, or an active session nobody can explain are all
 //! [`Verdict::Refused`] or [`Verdict::Unresolved`] — never access.
+
+#[cfg(test)]
+#[path = "capped_wire_tests.rs"]
+mod wire_tests;
 
 use std::{
     fs::OpenOptions,
@@ -260,8 +264,8 @@ impl SessionReader {
             return Err(SessionReadError::AddressFamilyMismatch);
         }
 
-        let deadline = Instant::now() + self.limits.total;
-        let stream = self.connect()?;
+        let deadline = Instant::now() + self.limits.total.min(Duration::from_secs(10));
+        let stream = self.connect(deadline)?;
 
         let request = format!(
             "GET {path} HTTP/1.1\r\n\
@@ -274,13 +278,7 @@ impl SessionReader {
             path = SESSION_PATH,
             host = self.target.addr(),
         );
-        if let Err(e) = (&stream).write_all(request.as_bytes()) {
-            return Err(if is_timeout(&e) {
-                SessionReadError::WriteFailed("timeout".into())
-            } else {
-                SessionReadError::WriteFailed(e.to_string())
-            });
-        }
+        self.write_request(&stream, request.as_bytes(), deadline)?;
 
         let (_status, body) = self.read_response(&stream, deadline)?;
         let raw_digest = sha256::Hash::hash(&body).to_string();
@@ -293,7 +291,33 @@ impl SessionReader {
         })
     }
 
-    fn connect(&self) -> Result<TcpStream, SessionReadError> {
+    fn write_request(
+        &self,
+        mut stream: &TcpStream,
+        mut bytes: &[u8],
+        deadline: Instant,
+    ) -> Result<(), SessionReadError> {
+        while !bytes.is_empty() {
+            let remaining = deadline
+                .saturating_duration_since(Instant::now())
+                .min(self.limits.write);
+            if remaining.is_zero() {
+                return Err(SessionReadError::WriteFailed("timeout".into()));
+            }
+            stream
+                .set_write_timeout(Some(remaining))
+                .map_err(|e| SessionReadError::WriteFailed(e.to_string()))?;
+            match stream.write(bytes) {
+                Ok(0) => return Err(SessionReadError::WriteFailed("write zero".into())),
+                Ok(n) => bytes = &bytes[n..],
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(SessionReadError::WriteFailed(e.to_string())),
+            }
+        }
+        Ok(())
+    }
+
+    fn connect(&self, deadline: Instant) -> Result<TcpStream, SessionReadError> {
         let domain = if self.target.addr().is_ipv4() {
             Domain::IPV4
         } else {
@@ -307,7 +331,13 @@ impl SessionReader {
             .map_err(|e| SessionReadError::ConnectFailed(e.to_string()))?;
         sock.bind(&SocketAddr::new(self.context.source(), 0).into())
             .map_err(|e| SessionReadError::ConnectFailed(e.to_string()))?;
-        match sock.connect_timeout(&self.target.addr().into(), self.limits.connect) {
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .min(self.limits.connect);
+        if remaining.is_zero() {
+            return Err(SessionReadError::ConnectTimeout);
+        }
+        match sock.connect_timeout(&self.target.addr().into(), remaining) {
             Ok(()) => {}
             Err(e) if is_timeout(&e) => return Err(SessionReadError::ConnectTimeout),
             Err(e) => return Err(SessionReadError::ConnectFailed(e.to_string())),
@@ -412,6 +442,11 @@ impl SessionReader {
         }
         let mut body = Vec::with_capacity(declared);
         conn.take_exact(declared, &mut body)?;
+        // Connection: close is required. Probe for EOF within the same deadline;
+        // never accept surplus bytes merely because TCP split them into packets.
+        if !conn.buffered().is_empty() || conn.fill()? != 0 {
+            return Err(SessionReadError::TrailingBytes);
+        }
         Ok((status, body))
     }
 }
@@ -448,7 +483,7 @@ impl<'a> Conn<'a> {
         let mut chunk = [0u8; 2048];
         loop {
             let remaining = self.deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
+            if remaining.is_zero() || self.read_timeout.is_zero() {
                 return Err(SessionReadError::ReadTimeout);
             }
             self.stream
@@ -492,11 +527,12 @@ fn parse_head(head: &[u8]) -> Result<(u16, Vec<(String, String)>), SessionReadEr
     let text = std::str::from_utf8(head).map_err(|_| SessionReadError::StatusLineMalformed)?;
     let mut lines = text.split("\r\n");
     let status_line = lines.next().ok_or(SessionReadError::StatusLineMalformed)?;
-    if !status_line.starts_with("HTTP/1.") {
+    let mut words = status_line.splitn(3, ' ');
+    if !matches!(words.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        || status_line.bytes().any(|b| b < 32 || b == 127)
+    {
         return Err(SessionReadError::StatusLineMalformed);
     }
-    let mut words = status_line.split_whitespace();
-    let _version = words.next();
     let code = words.next().ok_or(SessionReadError::StatusLineMalformed)?;
     if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_digit()) {
         return Err(SessionReadError::StatusLineMalformed);
@@ -526,6 +562,9 @@ fn parse_head(head: &[u8]) -> Result<(u16, Vec<(String, String)>), SessionReadEr
         {
             return Err(SessionReadError::MalformedHeader("bad name"));
         }
+        if value.bytes().any(|b| (b < 32 && b != b'\t') || b == 127) {
+            return Err(SessionReadError::MalformedHeader("bad value"));
+        }
         headers.push((
             name.to_ascii_lowercase(),
             value.trim_matches(|c| c == ' ' || c == '\t').to_string(),
@@ -549,6 +588,65 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// Unknown keys are tolerated because the gate's own answer also carries `status`
 /// and `mac`. A body that is not an object, or that has no usable `state`, is an
 /// error rather than a guessed phase.
+// Deserialize recursively rather than through Value's last-key-wins map.
+fn strict_json(body: &[u8]) -> Result<serde_json::Value, serde_json::Error> {
+    struct Unique(serde_json::Value);
+    impl<'de> serde::Deserialize<'de> for Unique {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = Unique;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("JSON with unique object keys")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut a: A,
+                ) -> Result<Unique, A::Error> {
+                    let mut map = serde_json::Map::new();
+                    while let Some(key) = a.next_key::<String>()? {
+                        if map.contains_key(&key) {
+                            return Err(serde::de::Error::custom("duplicate member"));
+                        }
+                        map.insert(key, a.next_value::<Unique>()?.0);
+                    }
+                    Ok(Unique(serde_json::Value::Object(map)))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut a: A,
+                ) -> Result<Unique, A::Error> {
+                    let mut values = Vec::new();
+                    while let Some(v) = a.next_element::<Unique>()? {
+                        values.push(v.0);
+                    }
+                    Ok(Unique(serde_json::Value::Array(values)))
+                }
+                fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_unit<E: serde::de::Error>(self) -> Result<Unique, E> {
+                    Ok(Unique(serde_json::Value::Null))
+                }
+            }
+            d.deserialize_any(Visitor)
+        }
+    }
+    serde_json::from_slice::<Unique>(body).map(|v| v.0)
+}
+
 fn parse_session_body(
     body: &[u8],
 ) -> Result<(SessionPhase, Option<u64>, Option<String>), SessionReadError> {
@@ -556,7 +654,7 @@ fn parse_session_body(
         return Err(SessionReadError::Malformed("empty body"));
     }
     let value: serde_json::Value =
-        serde_json::from_slice(body).map_err(|_| SessionReadError::Malformed("not JSON"))?;
+        strict_json(body).map_err(|_| SessionReadError::Malformed("not JSON"))?;
     let object = value
         .as_object()
         .ok_or(SessionReadError::Malformed("not an object"))?;
@@ -694,8 +792,7 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
     if body.is_empty() {
         return Err("empty_body".into());
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(body).map_err(|_| "body_not_json".to_string())?;
+    let value: serde_json::Value = strict_json(body).map_err(|_| "body_not_json".to_string())?;
     let object = value.as_object().ok_or("body_not_object")?;
     let kind = object.get("kind").and_then(|v| v.as_u64());
     if kind != Some(1022) {
@@ -989,8 +1086,8 @@ pub struct PollPolicy {
 impl PollPolicy {
     pub fn new(attempts: u32, interval: Duration) -> Self {
         Self {
-            attempts: attempts.max(1),
-            interval,
+            attempts: attempts.clamp(1, 16),
+            interval: interval.min(Duration::from_secs(1)),
         }
     }
 }
@@ -1093,7 +1190,7 @@ impl std::error::Error for PurchaseError {}
 /// A private directory of append-only evidence files.
 ///
 /// The leaf must be a `0700` directory; files are written `0600` under a temporary
-/// name, fsynced, renamed, and the directory is fsynced, so a reader never sees a
+/// name, fsynced, linked without replacement, and the directory is fsynced, so a reader never sees a
 /// half-written record.
 #[derive(Debug, Clone)]
 pub struct EvidenceSink {
@@ -1128,25 +1225,43 @@ impl EvidenceSink {
         &self.dir
     }
 
-    /// Write one record as `<stem>.<kind>.json`. `stem` is unique per call across
-    /// processes (pid + seconds + counter), so a replay keeps its own file instead
-    /// of overwriting the evidence of the attempt it replays.
+    /// Write one record as `<stem>.<kind>.json`. Collisions across reopened
+    /// sinks or processes are retried using atomic no-replace publication.
+    /// A replay cannot overwrite the evidence of the attempt it replays.
     fn write(&self, kind: &str, bytes: &[u8]) -> io::Result<PathBuf> {
-        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
-        let stem = format!("{}-{}-{}", std::process::id(), unix_now(), seq);
-        let final_path = self.dir.join(format!("{stem}.{kind}.json"));
-        let tmp_path = self.dir.join(format!(".{stem}.{kind}.tmp"));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp_path)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp_path, &final_path)?;
-        std::fs::File::open(&self.dir)?.sync_all()?;
-        Ok(final_path)
+        loop {
+            let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+            let stem = format!("{}-{}-{}", std::process::id(), unix_now(), seq);
+            let final_path = self.dir.join(format!("{stem}.{kind}.json"));
+            let tmp_path = self.dir.join(format!(".{stem}.{kind}.tmp"));
+            let mut file = match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp_path)
+            {
+                Ok(file) => file,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            };
+            let result = (|| {
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                // hard_link atomically publishes a complete inode and NEVER
+                // replaces a destination, even across reopened/concurrent sinks.
+                std::fs::hard_link(&tmp_path, &final_path)
+            })();
+            drop(file);
+            std::fs::remove_file(&tmp_path)?;
+            match result {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+                Ok(()) => {
+                    std::fs::File::open(&self.dir)?.sync_all()?;
+                    return Ok(final_path);
+                }
+            }
+        }
     }
 }
 
@@ -1223,6 +1338,8 @@ fn poll_session(
     reader: &SessionReader,
     policy: PollPolicy,
 ) -> (Option<SessionState>, Option<SessionReadError>) {
+    // Normalize here too: public struct literals must not bypass the caps.
+    let policy = PollPolicy::new(policy.attempts, policy.interval);
     let mut last: Option<SessionState> = None;
     let mut error: Option<SessionReadError> = None;
     for attempt in 0..policy.attempts {

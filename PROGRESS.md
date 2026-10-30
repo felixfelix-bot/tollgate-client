@@ -1,5 +1,14 @@
 # Progress
 
+## Durable send-once safety slice
+
+- Atomic reserve, permanent proof ownership and post_may_have_started before callback.
+- Replay/status only; all-unspent and refusals hold exposure, never authorize resend.
+- Trusted proof/vault/network input seam is NOT production-safe validation.
+- Schema v2 rejects v1/unknown without migration/reset; CLI/JNI/watch unchanged.
+- Eight new tests; persistence/all-feature suites 84 each; minimal 61; Android host 2.
+- See docs/durable-send-state.md for measured coverage and integration gates.
+
 ## Linux process-crash follow-up
 
 - Six parent scenarios plus subprocess entrypoint; deterministic pipe handshakes,

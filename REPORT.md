@@ -1,5 +1,22 @@
 # Safety milestone report
 
+## Durable send-once evidence
+
+Based on b0d5eef, isolated pr/durable-send-state worktree. Initial test command
+exited 101 (missing module/API compile RED); after implementation eight new tests
+pass, including two OS-process owners producing exactly one fake POST.
+Full `cargo test --locked --no-default-features --features persistence` and
+`cargo test --locked --all-features`: 84 top-level tests each (four child executions
+excluded). Minimal no-default: 61. Android JVM tests: 2, zero buys.
+`cargo fmt`, `git diff --check`: passed. Existing unrelated warnings remain.
+Direct LLVM profile: send_state.rs lines 85.71%, regions 79.36%, functions 87.50%;
+no branch coverage. Instrumented send suite only, not all-suite coverage.
+Logs: manager scratch send-{red,persistence,all,minimal,cov}.log; send.profdata.
+No production parsing/vault/transport/reconciliation or spending enablement.
+Pre-mark SQL-abort produces zero callbacks; response-write failure retains
+ambiguity; interruption test is panic/reopen, not process-kill at the send mark.
+No second PR, funds, devices or deployment. See docs/durable-send-state.md.
+
 ## Linux process-crash follow-up
 
 Read the existing tests, cold review and payment safety design first. Added six

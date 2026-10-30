@@ -24,3 +24,5 @@ pub mod policy;
 pub mod purchase;
 pub mod runner;
 pub mod scoring;
+#[cfg(feature = "persistence")]
+pub mod send_state;

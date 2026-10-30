@@ -19,7 +19,18 @@ const SCHEMA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK
                 day INTEGER NOT NULL CHECK(day>=0), amount INTEGER NOT NULL CHECK(amount>=0));
             CREATE UNIQUE INDEX one_reserve ON operations(reservation) WHERE kind='reserve';
             CREATE UNIQUE INDEX one_terminal ON operations(reservation) WHERE kind!='reserve';
-            PRAGMA user_version=1;";
+            CREATE TABLE sends (
+                operation TEXT PRIMARY KEY NOT NULL REFERENCES reservations(id),
+                network TEXT NOT NULL, vault TEXT NOT NULL, mint TEXT NOT NULL,
+                phase TEXT NOT NULL CHECK(phase='post_may_have_started'),
+                delivery INTEGER NOT NULL CHECK(delivery BETWEEN 0 AND 2),
+                observation INTEGER NOT NULL CHECK(observation BETWEEN 0 AND 3));
+            CREATE TABLE proof_claims (
+                mint TEXT NOT NULL, y TEXT NOT NULL, keyset TEXT NOT NULL,
+                amount INTEGER NOT NULL CHECK(amount>0),
+                operation TEXT NOT NULL REFERENCES sends(operation),
+                PRIMARY KEY(mint,y));
+            PRAGMA user_version=2;";
 
 #[derive(Debug)]
 pub enum Error {
@@ -43,12 +54,12 @@ impl From<std::io::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 pub struct BudgetStore {
-    db: Connection,
+    pub(crate) db: Connection,
 }
-fn number(n: u64) -> Result<i64> {
+pub(crate) fn number(n: u64) -> Result<i64> {
     i64::try_from(n).map_err(|_| Error::Invalid)
 }
-fn label(s: &str) -> Result<()> {
+pub(crate) fn label(s: &str) -> Result<()> {
     if s.is_empty()
         || s.len() > 128
         || !s
@@ -105,7 +116,7 @@ impl BudgetStore {
         let db = Self::connect(path.as_ref())?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-        if version != 1 || integrity != "ok" {
+        if version != 2 || integrity != "ok" {
             return Err(Error::Schema);
         }
         db.query_row("SELECT high_day FROM metadata WHERE singleton=1", [], |r| {
@@ -142,6 +153,13 @@ impl BudgetStore {
             (SELECT count(*) FROM operations WHERE day>(SELECT high_day FROM metadata WHERE singleton=1))",
             [], |r| r.get(0))?;
         if invalid != 0 {
+            return Err(Error::Schema);
+        }
+        let invalid_send: i64 = db.query_row("SELECT count(*) FROM sends s JOIN reservations r ON r.id=s.operation WHERE
+            EXISTS(SELECT 1 FROM operations o WHERE o.reservation=s.operation AND o.kind!='reserve') OR
+            r.face != (SELECT COALESCE(SUM(amount),0) FROM proof_claims p WHERE p.operation=s.operation) OR
+            EXISTS(SELECT 1 FROM proof_claims p WHERE p.operation=s.operation AND p.mint!=s.mint)", [], |r|r.get(0))?;
+        if invalid_send != 0 {
             return Err(Error::Schema);
         }
         Ok(Self { db })
@@ -191,6 +209,20 @@ impl BudgetStore {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::reserve_on(&tx, id, unit, day, face, fee, cap, total)?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub(crate) fn reserve_on(
+        tx: &Connection,
+        id: &str,
+        unit: &str,
+        day: i64,
+        face: i64,
+        fee: i64,
+        cap: i64,
+        total: i64,
+    ) -> Result<()> {
         let old = tx
             .query_row(
                 "SELECT unit,day,face,fee,cap FROM reservations WHERE id=?1",
@@ -226,7 +258,6 @@ impl BudgetStore {
             "INSERT INTO operations VALUES(?1,?1,'reserve',?2,?3)",
             params![id, day, total],
         )?;
-        tx.commit()?;
         Ok(())
     }
     /// Final settlement releases unused exposure and books actual debit on observation day.
@@ -254,6 +285,14 @@ impl BudgetStore {
     ) -> Result<()> {
         label(operation)?;
         label(reservation)?;
+        // Send-owned exposure cannot be resolved by the accounting-only caller seam.
+        if self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sends WHERE operation=?1)",
+            [reservation],
+            |r| r.get::<_, bool>(0),
+        )? {
+            return Err(Error::Conflict);
+        }
         let (day, actual) = (number(day)?, number(actual)?);
         let tx = self
             .db

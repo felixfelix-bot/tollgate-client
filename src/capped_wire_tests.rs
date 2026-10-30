@@ -127,3 +127,41 @@ fn zero_total_budget_never_connects() {
     assert!(reader.read().is_err());
     assert!(listener.accept().is_err(), "connected after total deadline");
 }
+
+// ---- regression: the production gate's three-element device-identifier ------
+//
+// TollGate emits `["device-identifier", "mac", "<address>"]` (three elements):
+// tollgate-module-basic-go src/merchant/merchant.go:2191 and :2278, and its own
+// reader requires `len(tag) >= 3` (:2097, :2249). A parser that insists on
+// exactly two elements rejects every real grant.
+#[test]
+fn production_three_element_device_identifier_is_a_grant() {
+    // Verbatim shape from the gate, including start-time.
+    let body = br#"{"kind":1022,"tags":[["device-identifier","mac","8C:16:45:0D:6F:C5"],["allotment","440401920"],["metric","bytes"],["start-time","1750000000"]]}"#;
+    let notice = notice_from_body(200, body).expect("a real grant must parse");
+    assert_eq!(notice.allotment, 440_401_920);
+    assert_eq!(notice.metric, "bytes");
+    assert_eq!(
+        notice.device_mac.as_deref(),
+        Some("8c:16:45:0d:6f:c5"),
+        "the address lives in the third element, canonicalised"
+    );
+}
+
+#[test]
+fn two_element_device_identifier_still_works() {
+    // The older/two-element spelling must keep working: the address in slot 1.
+    let body = br#"{"kind":1022,"tags":[["device-identifier","aa:bb:cc:dd:ee:ff"],["allotment","1"],["metric","bytes"]]}"#;
+    let notice = notice_from_body(200, body).expect("two-element form still parses");
+    assert_eq!(notice.device_mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+}
+
+#[test]
+fn three_element_tag_with_unknown_key_is_still_tolerated() {
+    // Unknown keys are ignored (the gate carries start-time and others); a
+    // three-element tag must not become a hard error just because it is longer.
+    let body = br#"{"kind":1022,"tags":[["allotment","1"],["metric","bytes"],["start-time","1750000000"]]}"#;
+    let notice = notice_from_body(200, body).expect("unknown multi-element tags are tolerated");
+    assert_eq!(notice.device_mac, None);
+    assert_eq!(notice.allotment, 1);
+}

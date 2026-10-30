@@ -698,6 +698,14 @@ fn known_metric(value: &str) -> bool {
     matches!(value, "milliseconds" | "bytes")
 }
 
+/// Reason tag for "well-formed notice in a unit this client does not speak".
+///
+/// It is deliberately distinct from every real malformation: `parse_send_outcome`
+/// maps it to [`DeliveryObservation::Unknown`], because a gate that answered with
+/// a grant notice has *granted*, and calling that a refusal would claim the
+/// opposite of what happened.
+const UNSUPPORTED_METRIC: &str = "unsupported_metric";
+
 fn valid_mac(value: &str) -> bool {
     value.len() == 17
         && value.split(':').count() == 6
@@ -790,6 +798,16 @@ pub fn parse_send_outcome(outcome: SendOutcomeView<'_>) -> ParsedSend {
                 pre_send_refusal: false,
                 detail: None,
             },
+            Err(detail) if detail == UNSUPPORTED_METRIC => ParsedSend {
+                // The gate answered with a grant notice in a unit this client does
+                // not speak. It granted; it did not refuse. Money may be gone and
+                // the session may be open, so the honest bucket is Unknown (which
+                // retains exposure and requires reconciliation), never a refusal.
+                delivery: DeliveryObservation::Unknown,
+                notice: None,
+                pre_send_refusal: false,
+                detail: Some(UNSUPPORTED_METRIC.to_string()),
+            },
             Err(detail) => ParsedSend {
                 delivery: DeliveryObservation::RefusalOrMalformed,
                 notice: None,
@@ -838,11 +856,18 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
     let mut device_seen = false;
     for tag in tags {
         let pair = tag.as_array().ok_or("tag_not_array")?;
-        if pair.len() != 2 {
+        // Nostr permits multi-element tags, and the real gate uses one: it emits
+        // ["device-identifier", "mac", "<address>"] (see the regression tests and
+        // tollgate-module-basic-go src/merchant/merchant.go:2191). Requiring
+        // exactly two elements rejected every production grant, so slots 0 and 1
+        // are read as key/value and any trailing elements are ignored by the
+        // arms that have no use for them.
+        if pair.len() < 2 {
             return Err("tag_not_pair".into());
         }
         let key = pair[0].as_str().ok_or("tag_key_not_string")?;
         let value = pair[1].as_str().ok_or("tag_value_not_string")?;
+        let extra = pair.get(2).and_then(|v| v.as_str());
         match key {
             "allotment" => {
                 if allotment.is_some() {
@@ -862,9 +887,9 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
                 if metric.is_some() {
                     return Err("duplicate_metric".into());
                 }
-                if !known_metric(value) {
-                    return Err("bad_metric".into());
-                }
+                // Structural checks first: a repeated tag is malformed whatever
+                // the unit says. Vocabulary is validated after the loop so that
+                // "duplicate" is never reported as "unsupported".
                 metric = Some(value.to_string());
             }
             "device-identifier" => {
@@ -872,8 +897,22 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
                     return Err("duplicate_device".into());
                 }
                 device_seen = true;
+                // Two spellings exist in the wild:
+                //   ["device-identifier", "<addr>"]            -> value is the address
+                //   ["device-identifier", "mac", "<addr>"]     -> value is the TYPE
+                // The three-element form is what TollGate actually emits, so the
+                // address sits in slot 2 there. Never treat the type literal as an
+                // address.
                 if value == "mac" {
-                    // Gate versions emit the identifier TYPE rather than an address.
+                    match extra {
+                        Some(address) if valid_mac(address) => {
+                            device_mac = Some(address.to_ascii_lowercase())
+                        }
+                        // A bare type with no address is not malformed: it simply
+                        // provides no attribution, which the verdict already says.
+                        None => {}
+                        Some(_) => return Err("bad_device".into()),
+                    }
                 } else if valid_mac(value) {
                     device_mac = Some(value.to_ascii_lowercase());
                 } else {
@@ -885,10 +924,18 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
     }
     // Both are required: an allotment with no metric cannot become a rate, and a
     // metric with no allotment is not a grant this client could honour.
+    let allotment = allotment.ok_or("no_allotment")?;
+    let metric = metric.ok_or("no_metric")?;
+    // Structural validity is settled above; only now judge the vocabulary. A unit
+    // this client does not speak means "granted, uninterpretable", which is not a
+    // refusal — see UNSUPPORTED_METRIC and parse_send_outcome.
+    if !known_metric(&metric) {
+        return Err(UNSUPPORTED_METRIC.into());
+    }
     Ok(GrantNotice {
         device_mac,
-        allotment: allotment.ok_or("no_allotment")?,
-        metric: metric.ok_or("no_metric")?,
+        allotment,
+        metric,
         raw_digest: sha256::Hash::hash(body).to_string(),
     })
 }
@@ -1792,7 +1839,6 @@ mod tests {
             br#"{"kind":1022,"tags":[["allotment","60000"]]}"#,
             br#"{"kind":1022,"tags":[["allotment","1"],["allotment","2"],["metric","b"]]}"#,
             br#"{"kind":1022,"tags":[["allotment","1"],["metric","b"],["metric","c"]]}"#,
-            br#"{"kind":1022,"tags":[["allotment","1"],["metric",""]]}"#,
             br#"{"kind":1022,"tags":[["allotment","0"],["metric","b"]]}"#,
             br#"{"kind":1022,"tags":[["allotment",1],["metric","b"]]}"#,
             br#"{"kind":1022}"#,
@@ -1811,6 +1857,26 @@ mod tests {
             );
             assert!(parsed.notice.is_none());
             assert!(parsed.detail.is_some());
+        }
+
+        // One shape is deliberately NOT in that list: a well-formed notice whose
+        // only defect is a unit this client does not speak. The gate granted, so
+        // the answer is Unknown (exposure retained), never a refusal. Kept
+        // adjacent to the refusal set so the distinction cannot rot.
+        for unit in ["", "b", "seconds"] {
+            let body = format!(r#"{{"kind":1022,"tags":[["allotment","1"],["metric","{unit}"]]}}"#);
+            let owned = SendOutcome::Complete {
+                status: 200,
+                body: body.clone().into_bytes(),
+            };
+            let parsed = parse_send_outcome((&owned).into());
+            assert_eq!(
+                parsed.delivery,
+                DeliveryObservation::Unknown,
+                "unit {unit:?} is unsupported, not a refusal"
+            );
+            assert_eq!(parsed.detail.as_deref(), Some("unsupported_metric"));
+            assert!(parsed.notice.is_none());
         }
     }
 

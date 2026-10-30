@@ -120,12 +120,21 @@ pub fn run_once(
 ) -> Result<RunReport, String> {
     let (status, body) = http::request("GET", gate_url, None, timeout_ms)?;
     if status != 200 {
-        return Err(format!("{gate_url} answered HTTP {status} on the advert probe"));
+        return Err(format!(
+            "{gate_url} answered HTTP {status} on the advert probe"
+        ));
     }
     let kind = body
         .split("\"kind\":")
         .nth(1)
-        .and_then(|r| r.trim_start().chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok())
+        .and_then(|r| {
+            r.trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .ok()
+        })
         .ok_or_else(|| "advert body has no numeric kind".to_string())?;
     let tags = extract_tags(&body);
     let advert = parse_advertisement(kind, &tags).map_err(|e| e.to_string())?;
@@ -169,7 +178,9 @@ pub fn run_once(
 /// tags as `Vec<Vec<String>>`; this is the one place that knows JSON shape.
 fn extract_tags(body: &str) -> Vec<Vec<String>> {
     let mut tags = Vec::new();
-    let Some(start) = body.find("\"tags\"") else { return tags };
+    let Some(start) = body.find("\"tags\"") else {
+        return tags;
+    };
     let rest = &body[start..];
     let mut depth = 0usize;
     let mut current: Vec<String> = Vec::new();
@@ -230,7 +241,10 @@ mod tests {
         let tags = super::extract_tags(body);
         eprintln!("TAGS = {tags:?}");
         assert_eq!(tags.len(), 2);
-        assert_eq!(tags[0], vec!["metric".to_string(), "milliseconds".to_string()]);
+        assert_eq!(
+            tags[0],
+            vec!["metric".to_string(), "milliseconds".to_string()]
+        );
     }
 }
 
@@ -256,12 +270,21 @@ pub fn run_lightning(
 ) -> Result<LightningReport, String> {
     let (status_code, body) = http::request("GET", gate_url, None, timeout_ms)?;
     if status_code != 200 {
-        return Err(format!("{gate_url} answered HTTP {status_code} on the advert probe"));
+        return Err(format!(
+            "{gate_url} answered HTTP {status_code} on the advert probe"
+        ));
     }
     let kind = body
         .split("\"kind\":")
         .nth(1)
-        .and_then(|r| r.trim_start().chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok())
+        .and_then(|r| {
+            r.trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .ok()
+        })
         .ok_or_else(|| "advert body has no numeric kind".to_string())?;
     let mut advert = parse_advertisement(kind, &extract_tags(&body)).map_err(|e| e.to_string())?;
     advert.stamp_gateway(gate_url);
@@ -269,22 +292,30 @@ pub fn run_lightning(
     let decision = decide(&advert.offers, histories, caps, None)?;
     let reason = format!("{decision:?}");
     let status = match &decision {
-        crate::policy::Decision::Buy { gateway_id, steps, cost, .. } => {
+        crate::policy::Decision::Buy {
+            gateway_id,
+            steps,
+            cost,
+            ..
+        } => {
             let offer = advert
                 .offers
                 .iter()
                 .find(|o| &o.gateway_id == gateway_id)
                 .ok_or_else(|| "selected offer vanished".to_string())?;
             let _ = (steps, cost);
-            Some(crate::lightning::buy(
-                gate_url,
-                offer.total_cost().round() as u64,
-                &offer.mint_url,
-                payer,
-                timeout_ms,
-                poll_interval_ms,
-                max_polls,
-            ).map_err(|e| e.to_string())?)
+            Some(
+                crate::lightning::buy(
+                    gate_url,
+                    offer.total_cost().round() as u64,
+                    &offer.mint_url,
+                    payer,
+                    timeout_ms,
+                    poll_interval_ms,
+                    max_polls,
+                )
+                .map_err(|e| e.to_string())?,
+            )
         }
         _ => None,
     };

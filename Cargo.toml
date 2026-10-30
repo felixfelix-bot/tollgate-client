@@ -10,6 +10,14 @@ name = "tollgate_client_core"
 path = "src/lib.rs"
 
 [dependencies]
-cdk = "0.18.3"
-cdk-sqlite = "0.18.3"
-tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time"] }
+# The cdk wallet is the only part of the core that needs a C compiler (rusqlite
+# bundles SQLite) and a multi-thread runtime. Gating it keeps everything else
+# pure Rust, which is what lets the same crate build for Debian, musl routers
+# and Android from one source tree.
+cdk = { version = "0.18.3", optional = true }
+cdk-sqlite = { version = "0.18.3", optional = true }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time"], optional = true }
+
+[features]
+default = ["cdk"]
+cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio"]

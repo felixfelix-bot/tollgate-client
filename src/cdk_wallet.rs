@@ -68,11 +68,20 @@ impl CdkWallet {
     }
 
     /// NUT-04: quote → pay → mint. Returns a `cashuB…` token string.
-    pub fn mint_token(&self, amount: u64, payer: &mut dyn LightningPayer) -> Result<String, String> {
+    pub fn mint_token(
+        &self,
+        amount: u64,
+        payer: &mut dyn LightningPayer,
+    ) -> Result<String, String> {
         self.rt.block_on(async {
             let quote = self
                 .wallet
-                .mint_quote(PaymentMethod::BOLT11, Some(Amount::from(amount)), None, None)
+                .mint_quote(
+                    PaymentMethod::BOLT11,
+                    Some(Amount::from(amount)),
+                    None,
+                    None,
+                )
                 .await
                 .map_err(|e| format!("mint quote: {e}"))?;
 
@@ -84,7 +93,12 @@ impl CdkWallet {
                 .await
                 .map_err(|e| format!("mint: {e}"))?;
 
-            let token = Token::new(self.wallet.mint_url.clone(), proofs, None, self.unit.clone());
+            let token = Token::new(
+                self.wallet.mint_url.clone(),
+                proofs,
+                None,
+                self.unit.clone(),
+            );
             Ok(token.to_string())
         })
     }
@@ -110,7 +124,9 @@ impl CdkWallet {
                     final_expiry: None,
                 })
                 .collect();
-            let proofs: Proofs = parsed.proofs(&infos).map_err(|e| format!("token proofs: {e}"))?;
+            let proofs: Proofs = parsed
+                .proofs(&infos)
+                .map_err(|e| format!("token proofs: {e}"))?;
             let states = self
                 .wallet
                 .check_proofs_spent(proofs)
@@ -121,8 +137,13 @@ impl CdkWallet {
     }
 
     pub fn balance(&self) -> Result<u64, String> {
-        self.rt
-            .block_on(async { self.wallet.total_balance().await.map(|a| a.to_u64()).map_err(|e| e.to_string()) })
+        self.rt.block_on(async {
+            self.wallet
+                .total_balance()
+                .await
+                .map(|a| a.to_u64())
+                .map_err(|e| e.to_string())
+        })
     }
 }
 
@@ -140,7 +161,11 @@ pub struct CdkFunding {
 
 impl CdkFunding {
     pub fn new(seed: [u8; 64], db_dir: impl Into<String>, payer: Box<dyn LightningPayer>) -> Self {
-        Self { seed, db_dir: db_dir.into(), payer }
+        Self {
+            seed,
+            db_dir: db_dir.into(),
+            payer,
+        }
     }
 
     fn db_path(&self, mint_url: &str, unit: &str) -> String {
@@ -160,8 +185,15 @@ impl crate::agent::Wallet for CdkFunding {
 
     fn is_spent(&mut self, token: &str) -> Result<bool, String> {
         let parsed = Token::from_str(token).map_err(|e| format!("unparseable token: {e}"))?;
-        let mint_url = parsed.mint_url().map_err(|e| format!("token has no single mint: {e}"))?;
-        let wallet = CdkWallet::open(&mint_url.to_string(), &self.unit_name(), &self.db_path(&mint_url.to_string(), &self.unit_name()), self.seed)?;
+        let mint_url = parsed
+            .mint_url()
+            .map_err(|e| format!("token has no single mint: {e}"))?;
+        let wallet = CdkWallet::open(
+            &mint_url.to_string(),
+            &self.unit_name(),
+            &self.db_path(&mint_url.to_string(), &self.unit_name()),
+            self.seed,
+        )?;
         wallet.is_spent(token)
     }
 }

@@ -35,7 +35,10 @@ pub fn gate_url(address: &str) -> String {
 }
 
 pub fn default_gateway() -> Option<String> {
-    let out = std::process::Command::new("ip").args(["route", "show", "default"]).output().ok()?;
+    let out = std::process::Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -50,18 +53,27 @@ mod tests {
     fn finds_the_v4_default_route() {
         let table = "default via 192.168.50.1 dev wlan0 proto dhcp src 192.168.50.44 metric 600\n\
                      192.168.50.0/24 dev wlan0 proto kernel scope link src 192.168.50.44 metric 600\n";
-        assert_eq!(parse_default_gateway(table).as_deref(), Some("192.168.50.1"));
+        assert_eq!(
+            parse_default_gateway(table).as_deref(),
+            Some("192.168.50.1")
+        );
     }
 
     #[test]
     fn a_route_without_via_is_not_a_gateway() {
         assert_eq!(parse_default_gateway("default dev ppp0 scope link\n"), None);
-        assert_eq!(parse_default_gateway("192.168.1.0/24 dev eth0 scope link\n"), None);
+        assert_eq!(
+            parse_default_gateway("192.168.1.0/24 dev eth0 scope link\n"),
+            None
+        );
     }
 
     #[test]
     fn an_address_becomes_the_portal_url() {
         assert_eq!(gate_url("192.168.50.205"), "http://192.168.50.205:2121/");
-        assert_eq!(gate_url("http://198.51.100.7:2121/"), "http://198.51.100.7:2121/");
+        assert_eq!(
+            gate_url("http://198.51.100.7:2121/"),
+            "http://198.51.100.7:2121/"
+        );
     }
 }

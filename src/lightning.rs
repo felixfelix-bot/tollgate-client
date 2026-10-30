@@ -43,7 +43,9 @@ pub enum LightningError {
         retry_after: Option<u64>,
     },
     /// Paid, but the gate could not open yet. Do NOT pay again.
-    PaidButNotGranted { message: String },
+    PaidButNotGranted {
+        message: String,
+    },
     Transport(String),
     Malformed(String),
 }
@@ -51,14 +53,20 @@ pub enum LightningError {
 impl std::fmt::Display for LightningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LightningError::Refused { code, message, retry_after } => {
+            LightningError::Refused {
+                code,
+                message,
+                retry_after,
+            } => {
                 write!(f, "gate refused ({code}): {message}")?;
                 if let Some(r) = retry_after {
                     write!(f, " [retry after {r}s]")?;
                 }
                 Ok(())
             }
-            LightningError::PaidButNotGranted { message } => write!(f, "paid but not granted: {message}"),
+            LightningError::PaidButNotGranted { message } => {
+                write!(f, "paid but not granted: {message}")
+            }
             LightningError::Transport(e) => write!(f, "transport: {e}"),
             LightningError::Malformed(e) => write!(f, "malformed answer: {e}"),
         }
@@ -97,8 +105,10 @@ pub fn request_invoice(
             retry_after: field_u64(&resp, "retry_after"),
         });
     }
-    let quote = field_str(&resp, "quote").ok_or_else(|| LightningError::Malformed("no quote".into()))?;
-    let bolt11 = field_str(&resp, "invoice").ok_or_else(|| LightningError::Malformed("no invoice".into()))?;
+    let quote =
+        field_str(&resp, "quote").ok_or_else(|| LightningError::Malformed("no quote".into()))?;
+    let bolt11 = field_str(&resp, "invoice")
+        .ok_or_else(|| LightningError::Malformed("no invoice".into()))?;
     Ok(Invoice {
         quote,
         bolt11,
@@ -108,9 +118,14 @@ pub fn request_invoice(
     })
 }
 
-pub fn poll_status(gate_url: &str, quote: &str, timeout_ms: u64) -> Result<InvoiceStatus, LightningError> {
+pub fn poll_status(
+    gate_url: &str,
+    quote: &str,
+    timeout_ms: u64,
+) -> Result<InvoiceStatus, LightningError> {
     let url = format!("{}?quote={quote}", invoice_url(gate_url));
-    let (status, resp) = http::request("GET", &url, None, timeout_ms).map_err(LightningError::Transport)?;
+    let (status, resp) =
+        http::request("GET", &url, None, timeout_ms).map_err(LightningError::Transport)?;
 
     let code = field_str(&resp, "code").unwrap_or_default();
     if status == 503 && code == "access-grant-failed" {
@@ -120,7 +135,11 @@ pub fn poll_status(gate_url: &str, quote: &str, timeout_ms: u64) -> Result<Invoi
     }
     if status != 200 {
         return Err(LightningError::Refused {
-            code: if code.is_empty() { format!("http-{status}") } else { code },
+            code: if code.is_empty() {
+                format!("http-{status}")
+            } else {
+                code
+            },
             message: field_str(&resp, "error").unwrap_or_default(),
             retry_after: field_u64(&resp, "retry_after"),
         });
@@ -174,6 +193,9 @@ pub fn buy(
         }
     }
     Err(LightningError::PaidButNotGranted {
-        message: format!("no grant after {max_polls} polls (last state {})", last.state),
+        message: format!(
+            "no grant after {max_polls} polls (last state {})",
+            last.state
+        ),
     })
 }

@@ -78,8 +78,10 @@ pub fn decide(
 
     if let Some(inc_id) = incumbent {
         if chosen.gateway_id != inc_id {
-            if let Some((inc_value, inc_offer)) =
-                comparable.iter().find(|(_, o)| o.gateway_id == inc_id).copied()
+            if let Some((inc_value, inc_offer)) = comparable
+                .iter()
+                .find(|(_, o)| o.gateway_id == inc_id)
+                .copied()
             {
                 if best_value <= inc_value * (1.0 + caps.switch_margin) {
                     chosen = inc_offer;

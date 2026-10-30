@@ -35,7 +35,10 @@ fn a_200_with_a_session_event_is_a_grant() {
 
 #[test]
 fn a_400_with_a_notice_event_is_a_definitive_refusal() {
-    match classify_response(400, &notice_event("payment-error-invalid-token", "bad token")) {
+    match classify_response(
+        400,
+        &notice_event("payment-error-invalid-token", "bad token"),
+    ) {
         PaymentOutcome::Refused { code, message } => {
             assert_eq!(code, "payment-error-invalid-token");
             assert_eq!(message, "bad token");
@@ -48,7 +51,10 @@ fn a_400_with_a_notice_event_is_a_definitive_refusal() {
 #[test]
 fn a_500_is_ambiguous_not_a_refusal() {
     assert!(matches!(
-        classify_response(500, &notice_event("internal-error", "Payment processing failed")),
+        classify_response(
+            500,
+            &notice_event("internal-error", "Payment processing failed")
+        ),
         PaymentOutcome::Ambiguous { .. }
     ));
 }
@@ -88,21 +94,48 @@ fn a_200_carrying_a_notice_event_is_not_a_grant() {
 #[test]
 fn states_move_forward_only() {
     assert_eq!(
-        next_state(IntentState::Pending, &PaymentOutcome::Granted { allotment: None, metric: None, device_identifier: None }).unwrap(),
+        next_state(
+            IntentState::Pending,
+            &PaymentOutcome::Granted {
+                allotment: None,
+                metric: None,
+                device_identifier: None
+            }
+        )
+        .unwrap(),
         IntentState::Granted
     );
     assert_eq!(
-        next_state(IntentState::Pending, &PaymentOutcome::Ambiguous { reason: "timeout".into() }).unwrap(),
+        next_state(
+            IntentState::Pending,
+            &PaymentOutcome::Ambiguous {
+                reason: "timeout".into()
+            }
+        )
+        .unwrap(),
         IntentState::Ambiguous
     );
     // A grant is terminal even if a duplicate answer says otherwise.
     assert_eq!(
-        next_state(IntentState::Granted, &PaymentOutcome::Ambiguous { reason: "late".into() }).unwrap(),
+        next_state(
+            IntentState::Granted,
+            &PaymentOutcome::Ambiguous {
+                reason: "late".into()
+            }
+        )
+        .unwrap(),
         IntentState::Granted
     );
     // You cannot un-refuse a definitive refusal into a grant.
     assert!(matches!(
-        next_state(IntentState::Refused, &PaymentOutcome::Granted { allotment: None, metric: None, device_identifier: None }),
+        next_state(
+            IntentState::Refused,
+            &PaymentOutcome::Granted {
+                allotment: None,
+                metric: None,
+                device_identifier: None
+            }
+        ),
         Err(TransitionError { .. })
     ));
 }
@@ -111,15 +144,27 @@ fn states_move_forward_only() {
 #[test]
 fn ambiguous_reconciles_to_spent_or_unspent() {
     assert_eq!(
-        next_state(IntentState::Ambiguous, &PaymentOutcome::Reconciled { spent: true }).unwrap(),
+        next_state(
+            IntentState::Ambiguous,
+            &PaymentOutcome::Reconciled { spent: true }
+        )
+        .unwrap(),
         IntentState::Spent
     );
     assert_eq!(
-        next_state(IntentState::Ambiguous, &PaymentOutcome::Reconciled { spent: false }).unwrap(),
+        next_state(
+            IntentState::Ambiguous,
+            &PaymentOutcome::Reconciled { spent: false }
+        )
+        .unwrap(),
         IntentState::Unspent
     );
     // Reconciling something that was never ambiguous is a bug, not a no-op.
-    assert!(next_state(IntentState::Pending, &PaymentOutcome::Reconciled { spent: true }).is_err());
+    assert!(next_state(
+        IntentState::Pending,
+        &PaymentOutcome::Reconciled { spent: true }
+    )
+    .is_err());
 }
 
 /// The journal key must identify an attempt without storing the bearer token.

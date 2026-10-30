@@ -10,11 +10,12 @@
 
 use std::collections::HashMap;
 use std::process::ExitCode;
+use tollgate_client_core::agent::Wallet;
+#[cfg(feature = "cdk")]
+use tollgate_client_core::cdk_wallet::CdkFunding;
+use tollgate_client_core::lightning::LightningPayer;
 use tollgate_client_core::policy::Caps;
 use tollgate_client_core::purchase::IntentState;
-use tollgate_client_core::lightning::LightningPayer;
-use tollgate_client_core::agent::Wallet;
-use tollgate_client_core::cdk_wallet::CdkFunding;
 use tollgate_client_core::runner::{run_lightning, run_once, FileJournal, FileWallet};
 
 /// Prints the invoice for a human to pay with any wallet, then lets the poll
@@ -37,18 +38,55 @@ fn arg(args: &[String], name: &str) -> Option<String> {
         .cloned()
 }
 
+/// The cdk wallet, or a clear refusal in a build that was compiled without it.
+#[cfg(feature = "cdk")]
+fn cdk_wallet_from_args(args: &[String]) -> Result<Box<dyn Wallet>, (String, u8)> {
+    let Some(seed_file) = opt(args, "--seed-file", "TOLLGATE_SEED_FILE") else {
+        return Err((
+            "--wallet cdk needs --seed-file (64 raw bytes, mode 0600)".into(),
+            64,
+        ));
+    };
+    let Some(db_dir) = opt(args, "--wallet-db", "TOLLGATE_WALLET_DB") else {
+        return Err((
+            "--wallet cdk needs --wallet-db (a directory, 0700)".into(),
+            64,
+        ));
+    };
+    let seed = load_seed(&seed_file).map_err(|e| (e, 78))?;
+    Ok(Box::new(CdkFunding::new(
+        seed,
+        db_dir,
+        Box::new(ManualPayer),
+    )))
+}
+
+#[cfg(not(feature = "cdk"))]
+fn cdk_wallet_from_args(_args: &[String]) -> Result<Box<dyn Wallet>, (String, u8)> {
+    Err((
+        "this binary was built without the cdk wallet (--no-default-features)".into(),
+        78,
+    ))
+}
+
 /// A wallet seed is the wallet. Anything but `0600` is refused rather than
 /// silently accepted, because the failure mode is theft, not breakage.
+#[cfg(feature = "cdk")]
 fn load_seed(path: &str) -> Result<[u8; 64], String> {
     use std::os::unix::fs::PermissionsExt;
     let meta = std::fs::metadata(path).map_err(|e| format!("cannot stat seed file {path}: {e}"))?;
     let mode = meta.permissions().mode() & 0o777;
     if mode != 0o600 {
-        return Err(format!("seed file {path} is mode {mode:o}; refusing anything but 0600"));
+        return Err(format!(
+            "seed file {path} is mode {mode:o}; refusing anything but 0600"
+        ));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read seed file {path}: {e}"))?;
     if bytes.len() != 64 {
-        return Err(format!("seed file {path} is {} bytes; expected 64", bytes.len()));
+        return Err(format!(
+            "seed file {path} is {} bytes; expected 64",
+            bytes.len()
+        ));
     }
     let mut seed = [0u8; 64];
     seed.copy_from_slice(&bytes);
@@ -67,9 +105,13 @@ fn lightning_main(args: &[String], gate: &str) -> ExitCode {
     }
     let mut caps = Caps {
         preferred_unit: arg(args, "--unit").unwrap_or_else(|| "sat".to_string()),
-        max_cost_per_minute: opt(args, "--max-cost-per-minute", "TOLLGATE_MAX_COST_PER_MINUTE")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2.0),
+        max_cost_per_minute: opt(
+            args,
+            "--max-cost-per-minute",
+            "TOLLGATE_MAX_COST_PER_MINUTE",
+        )
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2.0),
         daily_budget: opt(args, "--daily-budget", "TOLLGATE_DAILY_BUDGET")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100.0),
@@ -78,16 +120,27 @@ fn lightning_main(args: &[String], gate: &str) -> ExitCode {
             .unwrap_or(0.0),
         switch_margin: 0.20,
     };
-    let timeout_ms = arg(args, "--timeout-ms").and_then(|v| v.parse().ok()).unwrap_or(3000);
-    let poll_ms = arg(args, "--poll-ms").and_then(|v| v.parse().ok()).unwrap_or(1000);
-    let max_polls = arg(args, "--max-polls").and_then(|v| v.parse().ok()).unwrap_or(120);
+    let timeout_ms = arg(args, "--timeout-ms")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3000);
+    let poll_ms = arg(args, "--poll-ms")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let max_polls = arg(args, "--max-polls")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(120);
     let histories: HashMap<String, _> = HashMap::new();
     let mut payer = ManualPayer;
 
     let _ = &mut caps;
-    match run_lightning(gate, &caps, &histories, &mut payer, timeout_ms, poll_ms, max_polls) {
+    match run_lightning(
+        gate, &caps, &histories, &mut payer, timeout_ms, poll_ms, max_polls,
+    ) {
         Ok(report) => {
-            println!("PROBE gate={} offers={} decision={}", gate, report.advert_offers, report.decision);
+            println!(
+                "PROBE gate={} offers={} decision={}",
+                gate, report.advert_offers, report.decision
+            );
             match report.status {
                 Some(s) if s.access_granted => {
                     println!(
@@ -150,44 +203,41 @@ fn main() -> ExitCode {
         return lightning_main(&args, &gate);
     }
 
-    let (Some(journal), Some(attempt_id)) = (arg(&args, "--journal"), arg(&args, "--attempt-id")) else {
-        eprintln!("missing required flag (--token-file, --journal, --attempt-id); --help for usage");
+    let (Some(journal), Some(attempt_id)) = (arg(&args, "--journal"), arg(&args, "--attempt-id"))
+    else {
+        eprintln!(
+            "missing required flag (--token-file, --journal, --attempt-id); --help for usage"
+        );
         return ExitCode::from(64);
     };
     let token_file = opt(&args, "--token-file", "TOLLGATE_TOKEN_FILE").unwrap_or_default();
-    if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() != Some("cdk") && token_file.is_empty() {
+    if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() != Some("cdk") && token_file.is_empty()
+    {
         eprintln!("missing --token-file (or use --wallet cdk); --help for usage");
         return ExitCode::from(64);
     }
 
     // Two funding sources behind one seam: a pre-funded note, or cdk minting on
     // demand (which pays the mint's BOLT11 through the payer before it returns).
-    let mut wallet: Box<dyn Wallet> = if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() == Some("cdk") {
-        let Some(seed_file) = opt(&args, "--seed-file", "TOLLGATE_SEED_FILE") else {
-            eprintln!("--wallet cdk needs --seed-file (64 raw bytes, mode 0600)");
-            return ExitCode::from(64);
-        };
-        let Some(db_dir) = opt(&args, "--wallet-db", "TOLLGATE_WALLET_DB") else {
-            eprintln!("--wallet cdk needs --wallet-db (a directory, 0700)");
-            return ExitCode::from(64);
-        };
-        match load_seed(&seed_file) {
-            Ok(seed) => Box::new(CdkFunding::new(seed, db_dir, Box::new(ManualPayer))),
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::from(78);
+    let mut wallet: Box<dyn Wallet> =
+        if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() == Some("cdk") {
+            match cdk_wallet_from_args(&args) {
+                Ok(w) => w,
+                Err((message, code)) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(code);
+                }
             }
-        }
-    } else {
-        let token = match std::fs::read_to_string(&token_file) {
-            Ok(t) => t.trim().to_string(),
-            Err(e) => {
-                eprintln!("cannot read token file {token_file}: {e}");
-                return ExitCode::from(66);
-            }
+        } else {
+            let token = match std::fs::read_to_string(&token_file) {
+                Ok(t) => t.trim().to_string(),
+                Err(e) => {
+                    eprintln!("cannot read token file {token_file}: {e}");
+                    return ExitCode::from(66);
+                }
+            };
+            Box::new(FileWallet { token })
         };
-        Box::new(FileWallet { token })
-    };
     let mut journal = match FileJournal::open(&journal) {
         Ok(j) => j,
         Err(e) => {
@@ -198,9 +248,13 @@ fn main() -> ExitCode {
 
     let caps = Caps {
         preferred_unit: arg(&args, "--unit").unwrap_or_else(|| "sat".to_string()),
-        max_cost_per_minute: opt(&args, "--max-cost-per-minute", "TOLLGATE_MAX_COST_PER_MINUTE")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2.0),
+        max_cost_per_minute: opt(
+            &args,
+            "--max-cost-per-minute",
+            "TOLLGATE_MAX_COST_PER_MINUTE",
+        )
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2.0),
         daily_budget: opt(&args, "--daily-budget", "TOLLGATE_DAILY_BUDGET")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100.0),
@@ -214,15 +268,31 @@ fn main() -> ExitCode {
         .unwrap_or(3000);
     let histories: HashMap<String, _> = HashMap::new();
 
-    match run_once(&gate, &caps, &histories, &mut wallet, &mut journal, &attempt_id, timeout_ms) {
+    match run_once(
+        &gate,
+        &caps,
+        &histories,
+        &mut wallet,
+        &mut journal,
+        &attempt_id,
+        timeout_ms,
+    ) {
         Ok(report) => {
             println!(
                 "PROBE gate={} offers={} decision={}",
                 report.gate_url, report.advert_offers, report.decision
             );
             match report.result {
-                Some(AttemptResult::Finished { key, state, outcome, cost }) => {
-                    println!("RESULT key={key} state={} cost={cost} outcome={outcome:?}", state.as_str());
+                Some(AttemptResult::Finished {
+                    key,
+                    state,
+                    outcome,
+                    cost,
+                }) => {
+                    println!(
+                        "RESULT key={key} state={} cost={cost} outcome={outcome:?}",
+                        state.as_str()
+                    );
                     match state {
                         IntentState::Granted => ExitCode::SUCCESS,
                         _ => ExitCode::from(2),
@@ -233,7 +303,10 @@ fn main() -> ExitCode {
                     ExitCode::from(2)
                 }
                 Some(AttemptResult::AlreadyAttempted { key, state }) => {
-                    println!("RESULT key={key} state={} reason=already-attempted", state.as_str());
+                    println!(
+                        "RESULT key={key} state={} reason=already-attempted",
+                        state.as_str()
+                    );
                     ExitCode::from(2)
                 }
                 None => {

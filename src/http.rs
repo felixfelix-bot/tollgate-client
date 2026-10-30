@@ -17,7 +17,13 @@ pub fn request(
     body: Option<&str>,
     timeout_ms: u64,
 ) -> Result<(u16, String), String> {
-    request_with_headers(method, url, body, timeout_ms, &[("Content-Type", "text/plain")])
+    request_with_headers(
+        method,
+        url,
+        body,
+        timeout_ms,
+        &[("Content-Type", "text/plain")],
+    )
 }
 
 pub fn request_with_headers(

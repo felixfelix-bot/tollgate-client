@@ -8,13 +8,14 @@
 //! Protocol (discovery/purchase) lands in later modules; see
 //! docs/client/v1-client-contract.md.
 pub mod agent;
+#[cfg(feature = "cdk")]
+pub mod cdk_wallet;
 pub mod discovery;
-pub mod policy;
-pub mod purchase;
-pub mod scoring;
 pub mod http;
-pub mod runner;
 pub mod json;
 pub mod lightning;
-pub mod cdk_wallet;
 pub mod netcfg;
+pub mod policy;
+pub mod purchase;
+pub mod runner;
+pub mod scoring;

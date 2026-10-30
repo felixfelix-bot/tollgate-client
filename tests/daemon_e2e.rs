@@ -34,7 +34,9 @@ fn fake_gate(replies: Vec<(u16, String)>) -> (String, mpsc::Receiver<String>) {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         for (status, body) in replies {
-            let Ok((mut sock, _)) = listener.accept() else { return };
+            let Ok((mut sock, _)) = listener.accept() else {
+                return;
+            };
             let mut buf = [0u8; 4096];
             let n = sock.read(&mut buf).unwrap_or(0);
             let req = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -63,9 +65,20 @@ fn probes_decides_buys_and_journals_over_a_real_socket() {
     let _ = std::fs::remove_dir_all(&dir);
     let journal_path = dir.join("journal.txt");
 
-    let mut wallet = FileWallet { token: "cashuBpreminted".into() };
+    let mut wallet = FileWallet {
+        token: "cashuBpreminted".into(),
+    };
     let mut journal = FileJournal::open(&journal_path).unwrap();
-    let report = run_once(&url, &caps(), &HashMap::new(), &mut wallet, &mut journal, "attempt-1", 2000).unwrap();
+    let report = run_once(
+        &url,
+        &caps(),
+        &HashMap::new(),
+        &mut wallet,
+        &mut journal,
+        "attempt-1",
+        2000,
+    )
+    .unwrap();
 
     assert_eq!(report.advert_offers, 1);
     match report.result {
@@ -81,7 +94,10 @@ fn probes_decides_buys_and_journals_over_a_real_socket() {
 
     // The journal survives the process: re-open it and the grant is still there.
     let reopened = FileJournal::open(&journal_path).unwrap();
-    assert_eq!(reopened.state(&intent_key("attempt-1")), Some(IntentState::Granted));
+    assert_eq!(
+        reopened.state(&intent_key("attempt-1")),
+        Some(IntentState::Granted)
+    );
 }
 
 #[test]
@@ -91,13 +107,30 @@ fn a_second_run_with_the_same_attempt_does_not_touch_the_gate_again() {
     let _ = std::fs::remove_dir_all(&dir);
     let journal_path = dir.join("journal.txt");
 
-    let mut wallet = FileWallet { token: "cashuBpreminted".into() };
+    let mut wallet = FileWallet {
+        token: "cashuBpreminted".into(),
+    };
     let mut journal = FileJournal::open(&journal_path).unwrap();
     journal.begin(&intent_key("attempt-1")).unwrap();
-    journal.set_state(&intent_key("attempt-1"), IntentState::Granted).unwrap();
+    journal
+        .set_state(&intent_key("attempt-1"), IntentState::Granted)
+        .unwrap();
 
-    let report = run_once(&url, &caps(), &HashMap::new(), &mut wallet, &mut journal, "attempt-1", 2000).unwrap();
-    assert!(matches!(report.result, Some(AttemptResult::AlreadyAttempted { .. })), "got {:?}", report.result);
+    let report = run_once(
+        &url,
+        &caps(),
+        &HashMap::new(),
+        &mut wallet,
+        &mut journal,
+        "attempt-1",
+        2000,
+    )
+    .unwrap();
+    assert!(
+        matches!(report.result, Some(AttemptResult::AlreadyAttempted { .. })),
+        "got {:?}",
+        report.result
+    );
 }
 
 #[test]
@@ -110,14 +143,30 @@ fn a_definitive_refusal_is_journalled_and_not_retried() {
     let _ = std::fs::remove_dir_all(&dir);
     let journal_path = dir.join("journal.txt");
 
-    let mut wallet = FileWallet { token: "cashuBpreminted".into() };
+    let mut wallet = FileWallet {
+        token: "cashuBpreminted".into(),
+    };
     let mut journal = FileJournal::open(&journal_path).unwrap();
-    let report = run_once(&url, &caps(), &HashMap::new(), &mut wallet, &mut journal, "attempt-2", 2000).unwrap();
+    let report = run_once(
+        &url,
+        &caps(),
+        &HashMap::new(),
+        &mut wallet,
+        &mut journal,
+        "attempt-2",
+        2000,
+    )
+    .unwrap();
     match report.result {
         Some(AttemptResult::Finished { state, .. }) => assert_eq!(state, IntentState::Refused),
         other => panic!("expected Finished/Refused, got {other:?}"),
     }
-    assert_eq!(FileJournal::open(&journal_path).unwrap().state(&intent_key("attempt-2")), Some(IntentState::Refused));
+    assert_eq!(
+        FileJournal::open(&journal_path)
+            .unwrap()
+            .state(&intent_key("attempt-2")),
+        Some(IntentState::Refused)
+    );
 }
 
 #[test]
@@ -128,11 +177,29 @@ fn an_offer_over_the_cap_costs_a_probe_and_nothing_else() {
     let mut c = caps();
     c.max_cost_per_minute = 0.5; // the advert asks 2.0/min
 
-    let mut wallet = FileWallet { token: "cashuBpreminted".into() };
+    let mut wallet = FileWallet {
+        token: "cashuBpreminted".into(),
+    };
     let mut journal = FileJournal::open(dir.join("journal.txt")).unwrap();
-    let report = run_once(&url, &c, &HashMap::new(), &mut wallet, &mut journal, "attempt-3", 2000).unwrap();
+    let report = run_once(
+        &url,
+        &c,
+        &HashMap::new(),
+        &mut wallet,
+        &mut journal,
+        "attempt-3",
+        2000,
+    )
+    .unwrap();
 
-    assert!(report.result.is_none(), "nothing should be attempted: {:?}", report.result);
+    assert!(
+        report.result.is_none(),
+        "nothing should be attempted: {:?}",
+        report.result
+    );
     assert!(rx.recv().unwrap().starts_with("GET /"));
-    assert!(rx.recv().is_err(), "the gate must not be paid when a cap blocks the buy");
+    assert!(
+        rx.recv().is_err(),
+        "the gate must not be paid when a cap blocks the buy"
+    );
 }

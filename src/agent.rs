@@ -115,8 +115,11 @@ pub fn attempt_purchase(
 
     if state == IntentState::Ambiguous {
         let spent = wallet.is_spent(&token)?;
-        state = next_state(IntentState::Ambiguous, &PaymentOutcome::Reconciled { spent })
-            .map_err(|e| e.to_string())?;
+        state = next_state(
+            IntentState::Ambiguous,
+            &PaymentOutcome::Reconciled { spent },
+        )
+        .map_err(|e| e.to_string())?;
         journal.set_state(&key, state)?;
     }
 

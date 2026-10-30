@@ -32,9 +32,18 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::WrongKind(k) => write!(f, "event kind {k} is not an advertisement ({TOLLGATE_ADVERTISEMENT_KIND})"),
-            ParseError::MissingStepSize => write!(f, "advert has no usable step_size (missing, zero or non-numeric)"),
-            ParseError::UnknownMetric(m) => write!(f, "advert metric {m:?} cannot be priced (expected milliseconds or bytes)"),
+            ParseError::WrongKind(k) => write!(
+                f,
+                "event kind {k} is not an advertisement ({TOLLGATE_ADVERTISEMENT_KIND})"
+            ),
+            ParseError::MissingStepSize => write!(
+                f,
+                "advert has no usable step_size (missing, zero or non-numeric)"
+            ),
+            ParseError::UnknownMetric(m) => write!(
+                f,
+                "advert metric {m:?} cannot be priced (expected milliseconds or bytes)"
+            ),
         }
     }
 }
@@ -125,11 +134,7 @@ pub fn parse_advertisement(kind: u64, tags: &[Vec<String>]) -> Result<Advertisem
                 if mint_url.is_empty() {
                     continue;
                 }
-                let min_steps = tag[5]
-                    .trim()
-                    .parse::<u64>()
-                    .unwrap_or(1)
-                    .max(1);
+                let min_steps = tag[5].trim().parse::<u64>().unwrap_or(1).max(1);
                 raw_offers.push(RawOffer {
                     unit,
                     price_per_step: price,
@@ -141,7 +146,9 @@ pub fn parse_advertisement(kind: u64, tags: &[Vec<String>]) -> Result<Advertisem
         }
     }
 
-    let step_size = step_size.filter(|s| *s > 0).ok_or(ParseError::MissingStepSize)?;
+    let step_size = step_size
+        .filter(|s| *s > 0)
+        .ok_or(ParseError::MissingStepSize)?;
     let metric = metric.ok_or_else(|| ParseError::UnknownMetric("<missing>".to_string()))?;
 
     let mut offers: Vec<Offer> = Vec::with_capacity(raw_offers.len());

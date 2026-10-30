@@ -128,6 +128,23 @@ Caps and funding come from the environment when no flag is given, so
 `agent.env` is load-bearing rather than decorative (verified: cap 10 → granted,
 cap 0.5 → the gate is never asked).
 
+## Portability
+
+The cdk wallet is a cargo feature (`default = ["cdk"]`). Without it the whole
+core is pure Rust — no C compiler, no async runtime — and that is what makes one
+source tree serve all three targets:
+
+```
+aarch64-linux-android          Finished   <- the Android shell's foundation
+aarch64-unknown-linux-musl     Finished   <- router / static binary
+x86_64-unknown-linux-gnu       Finished   <- Debian
+```
+
+`cargo check --no-default-features --target aarch64-linux-android` passing is the
+load-bearing fact for the Android work: discovery, pricing, caps, purchase,
+classification and the Lightning lane all port as-is. Only the cdk wallet needs
+the NDK, and the Lightning lane does not need the wallet.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

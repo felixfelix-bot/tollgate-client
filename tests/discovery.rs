@@ -20,7 +20,14 @@ fn valid_tags() -> Vec<Vec<String>> {
         vec!["metric", "milliseconds"],
         vec!["step_size", "60000"],
         vec!["tips", "1", "2"],
-        vec!["price_per_step", "cashu", "2", "sat", "https://mint.example", "1"],
+        vec![
+            "price_per_step",
+            "cashu",
+            "2",
+            "sat",
+            "https://mint.example",
+            "1",
+        ],
     ])
 }
 
@@ -53,7 +60,10 @@ fn rejects_a_foreign_event_kind() {
 fn rejects_an_advert_without_a_usable_step_size() {
     let mut t = valid_tags();
     t.retain(|r| r[0] != "step_size");
-    assert!(matches!(parse_advertisement(10021, &t), Err(ParseError::MissingStepSize)));
+    assert!(matches!(
+        parse_advertisement(10021, &t),
+        Err(ParseError::MissingStepSize)
+    ));
 
     let mut t = valid_tags();
     for r in t.iter_mut() {
@@ -61,7 +71,10 @@ fn rejects_an_advert_without_a_usable_step_size() {
             r[1] = "0".to_string();
         }
     }
-    assert!(matches!(parse_advertisement(10021, &t), Err(ParseError::MissingStepSize)));
+    assert!(matches!(
+        parse_advertisement(10021, &t),
+        Err(ParseError::MissingStepSize)
+    ));
 }
 
 #[test]
@@ -72,7 +85,10 @@ fn rejects_an_unknown_metric() {
             r[1] = "furlongs".to_string();
         }
     }
-    assert!(matches!(parse_advertisement(10021, &t), Err(ParseError::UnknownMetric(_))));
+    assert!(matches!(
+        parse_advertisement(10021, &t),
+        Err(ParseError::UnknownMetric(_))
+    ));
 }
 
 /// Only `cashu` is payable by this client. A lightning-priced offer is not an
@@ -80,9 +96,18 @@ fn rejects_an_unknown_metric() {
 #[test]
 fn drops_offers_that_are_not_cashu() {
     let mut t = valid_tags();
-    t.push(tags(vec![
-        vec!["price_per_step", "lightning", "1", "sat", "https://ln.example", "1"],
-    ]).pop().unwrap());
+    t.push(
+        tags(vec![vec![
+            "price_per_step",
+            "lightning",
+            "1",
+            "sat",
+            "https://ln.example",
+            "1",
+        ]])
+        .pop()
+        .unwrap(),
+    );
     let ad = parse_advertisement(10021, &t).unwrap();
     assert_eq!(ad.offers.len(), 1);
     assert_eq!(ad.offers[0].price_per_step, 2);
@@ -91,11 +116,38 @@ fn drops_offers_that_are_not_cashu() {
 #[test]
 fn drops_unpayable_offers() {
     let cases: Vec<Vec<&str>> = vec![
-        vec!["price_per_step", "cashu", "0", "sat", "https://mint.example", "1"],   // free
-        vec!["price_per_step", "cashu", "2", "", "https://mint.example", "1"],      // no unit
-        vec!["price_per_step", "cashu", "2", "sat", "", "1"],                        // no mint
-        vec!["price_per_step", "cashu", "x", "sat", "https://mint.example", "1"],    // not a number
-        vec!["price_per_step", "cashu", "2", "sat", "https://mint.example"],         // too short
+        vec![
+            "price_per_step",
+            "cashu",
+            "0",
+            "sat",
+            "https://mint.example",
+            "1",
+        ], // free
+        vec![
+            "price_per_step",
+            "cashu",
+            "2",
+            "",
+            "https://mint.example",
+            "1",
+        ], // no unit
+        vec!["price_per_step", "cashu", "2", "sat", "", "1"], // no mint
+        vec![
+            "price_per_step",
+            "cashu",
+            "x",
+            "sat",
+            "https://mint.example",
+            "1",
+        ], // not a number
+        vec![
+            "price_per_step",
+            "cashu",
+            "2",
+            "sat",
+            "https://mint.example",
+        ], // too short
     ];
     for c in cases {
         let mut t = valid_tags();
@@ -110,7 +162,14 @@ fn missing_min_steps_defaults_to_one_and_sats_is_normalised() {
     let t = tags(vec![
         vec!["metric", "bytes"],
         vec!["step_size", "22020096"],
-        vec!["price_per_step", "cashu", "1", "sats", "https://mint.example", "x"],
+        vec![
+            "price_per_step",
+            "cashu",
+            "1",
+            "sats",
+            "https://mint.example",
+            "x",
+        ],
     ]);
     let ad = parse_advertisement(10021, &t).unwrap();
     assert_eq!(ad.metric, Metric::Bytes);
@@ -123,9 +182,18 @@ fn missing_min_steps_defaults_to_one_and_sats_is_normalised() {
 #[test]
 fn deduplicates_identical_offers() {
     let mut t = valid_tags();
-    t.push(tags(vec![
-        vec!["price_per_step", "cashu", "2", "sat", "https://mint.example", "1"],
-    ]).pop().unwrap());
+    t.push(
+        tags(vec![vec![
+            "price_per_step",
+            "cashu",
+            "2",
+            "sat",
+            "https://mint.example",
+            "1",
+        ]])
+        .pop()
+        .unwrap(),
+    );
     let ad = parse_advertisement(10021, &t).unwrap();
     assert_eq!(ad.offers.len(), 1);
 }

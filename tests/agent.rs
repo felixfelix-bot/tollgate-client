@@ -7,7 +7,9 @@
 //! 3. an ambiguous answer is reconciled against the mint, never retried blindly.
 
 use std::collections::HashMap;
-use tollgate_client_core::agent::{attempt_purchase, AttemptResult, GateTransport, Journal, Wallet};
+use tollgate_client_core::agent::{
+    attempt_purchase, AttemptResult, GateTransport, Journal, Wallet,
+};
 use tollgate_client_core::policy::Caps;
 use tollgate_client_core::purchase::{IntentState, PaymentOutcome};
 use tollgate_client_core::scoring::{Metric, Offer};
@@ -91,22 +93,41 @@ impl Journal for FakeJournal {
 }
 
 fn granted() -> (u16, String) {
-    (200, r#"{"kind":1022,"tags":[["allotment","60000"],["metric","milliseconds"]]}"#.to_string())
+    (
+        200,
+        r#"{"kind":1022,"tags":[["allotment","60000"],["metric","milliseconds"]]}"#.to_string(),
+    )
 }
 
 fn refused() -> (u16, String) {
-    (400, r#"{"kind":21023,"tags":[["code","payment-error-invalid-token"],["message","bad token"]]}"#.to_string())
+    (
+        400,
+        r#"{"kind":21023,"tags":[["code","payment-error-invalid-token"],["message","bad token"]]}"#
+            .to_string(),
+    )
 }
 
 #[test]
 fn no_token_is_minted_when_a_cap_blocks_the_purchase() {
     let mut wallet = FakeWallet::default();
-    let mut transport = FakeTransport { post_calls: 0, response: Ok(granted()) };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Ok(granted()),
+    };
     let mut journal = FakeJournal::default();
     let mut c = caps();
     c.max_cost_per_minute = 0.5; // offer costs 2.0/min
 
-    let r = attempt_purchase("gw-1", &offer(), &c, "attempt-1", &mut wallet, &mut transport, &mut journal).unwrap();
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &c,
+        "attempt-1",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
     assert!(matches!(r, AttemptResult::NotAttempted { .. }), "got {r:?}");
     assert_eq!(wallet.mint_calls, 0, "minted a token the caps forbade");
     assert_eq!(transport.post_calls, 0);
@@ -115,42 +136,92 @@ fn no_token_is_minted_when_a_cap_blocks_the_purchase() {
 #[test]
 fn a_grant_is_recorded_with_its_cost() {
     let mut wallet = FakeWallet::default();
-    let mut transport = FakeTransport { post_calls: 0, response: Ok(granted()) };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Ok(granted()),
+    };
     let mut journal = FakeJournal::default();
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-1", &mut wallet, &mut transport, &mut journal).unwrap();
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-1",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
     match r {
-        AttemptResult::Finished { state, cost, outcome, .. } => {
+        AttemptResult::Finished {
+            state,
+            cost,
+            outcome,
+            ..
+        } => {
             assert_eq!(state, IntentState::Granted);
             assert_eq!(cost, 2.0);
             assert!(matches!(outcome, PaymentOutcome::Granted { .. }));
         }
         other => panic!("expected Finished, got {other:?}"),
     }
-    assert_eq!(journal.state(&tollgate_client_core::purchase::intent_key("attempt-1")), Some(IntentState::Granted));
+    assert_eq!(
+        journal.state(&tollgate_client_core::purchase::intent_key("attempt-1")),
+        Some(IntentState::Granted)
+    );
 }
 
 #[test]
 fn a_definitive_refusal_is_not_reconciled() {
     let mut wallet = FakeWallet::default();
-    let mut transport = FakeTransport { post_calls: 0, response: Ok(refused()) };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Ok(refused()),
+    };
     let mut journal = FakeJournal::default();
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-2", &mut wallet, &mut transport, &mut journal).unwrap();
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-2",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
     match r {
         AttemptResult::Finished { state, .. } => assert_eq!(state, IntentState::Refused),
         other => panic!("expected Finished, got {other:?}"),
     }
-    assert_eq!(wallet.spend_checks, 0, "a plain refusal needs no mint query");
+    assert_eq!(
+        wallet.spend_checks, 0,
+        "a plain refusal needs no mint query"
+    );
 }
 
 #[test]
 fn a_timeout_reconciles_against_the_mint_and_books_a_spent_note() {
-    let mut wallet = FakeWallet { spent: true, ..Default::default() };
-    let mut transport = FakeTransport { post_calls: 0, response: Err("timeout".into()) };
+    let mut wallet = FakeWallet {
+        spent: true,
+        ..Default::default()
+    };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Err("timeout".into()),
+    };
     let mut journal = FakeJournal::default();
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-3", &mut wallet, &mut transport, &mut journal).unwrap();
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-3",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
     match r {
         AttemptResult::Finished { state, .. } => assert_eq!(state, IntentState::Spent),
         other => panic!("expected Finished, got {other:?}"),
@@ -160,11 +231,26 @@ fn a_timeout_reconciles_against_the_mint_and_books_a_spent_note() {
 
 #[test]
 fn a_timeout_with_an_unspent_note_is_retryable_but_not_auto_retried() {
-    let mut wallet = FakeWallet { spent: false, ..Default::default() };
-    let mut transport = FakeTransport { post_calls: 0, response: Err("timeout".into()) };
+    let mut wallet = FakeWallet {
+        spent: false,
+        ..Default::default()
+    };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Err("timeout".into()),
+    };
     let mut journal = FakeJournal::default();
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-4", &mut wallet, &mut transport, &mut journal).unwrap();
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-4",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
     match r {
         AttemptResult::Finished { state, .. } => assert_eq!(state, IntentState::Unspent),
         other => panic!("expected Finished, got {other:?}"),
@@ -175,25 +261,57 @@ fn a_timeout_with_an_unspent_note_is_retryable_but_not_auto_retried() {
 #[test]
 fn a_duplicate_attempt_is_never_reposted() {
     let mut wallet = FakeWallet::default();
-    let mut transport = FakeTransport { post_calls: 0, response: Ok(granted()) };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Ok(granted()),
+    };
     let mut journal = FakeJournal::default();
     let key = tollgate_client_core::purchase::intent_key("attempt-5");
     journal.states.insert(key.clone(), IntentState::Granted);
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-5", &mut wallet, &mut transport, &mut journal).unwrap();
-    assert!(matches!(r, AttemptResult::AlreadyAttempted { .. }), "got {r:?}");
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-5",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    )
+    .unwrap();
+    assert!(
+        matches!(r, AttemptResult::AlreadyAttempted { .. }),
+        "got {r:?}"
+    );
     assert_eq!(wallet.mint_calls, 0);
     assert_eq!(transport.post_calls, 0);
 }
 
 #[test]
 fn a_failed_mint_spends_nothing() {
-    let mut wallet = FakeWallet { fail_mint: true, ..Default::default() };
-    let mut transport = FakeTransport { post_calls: 0, response: Ok(granted()) };
+    let mut wallet = FakeWallet {
+        fail_mint: true,
+        ..Default::default()
+    };
+    let mut transport = FakeTransport {
+        post_calls: 0,
+        response: Ok(granted()),
+    };
     let mut journal = FakeJournal::default();
 
-    let r = attempt_purchase("gw-1", &offer(), &caps(), "attempt-6", &mut wallet, &mut transport, &mut journal);
+    let r = attempt_purchase(
+        "gw-1",
+        &offer(),
+        &caps(),
+        "attempt-6",
+        &mut wallet,
+        &mut transport,
+        &mut journal,
+    );
     assert!(r.is_err(), "a mint failure must surface, not be swallowed");
     assert_eq!(transport.post_calls, 0, "nothing to post without a token");
-    assert_eq!(journal.state(&tollgate_client_core::purchase::intent_key("attempt-6")), Some(IntentState::Unspent));
+    assert_eq!(
+        journal.state(&tollgate_client_core::purchase::intent_key("attempt-6")),
+        Some(IntentState::Unspent)
+    );
 }

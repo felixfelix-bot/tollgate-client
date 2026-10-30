@@ -18,7 +18,10 @@ pub fn field_u64(body: &str, key: &str) -> Option<u64> {
     let mut rest = &body[body.find(&k)? + k.len()..];
     rest = rest.trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
     if let Some(stripped) = rest.strip_prefix('"') {
-        let digits: String = stripped.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = stripped
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         return digits.parse().ok();
     }
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -56,6 +59,9 @@ mod tests {
     #[test]
     fn a_string_number_is_accepted_where_a_number_is_expected() {
         // Nostr tags quote numbers; JSON does not. Both appear in this protocol.
-        assert_eq!(field_u64(r#"{"allotment":"60000"}"#, "allotment"), Some(60_000));
+        assert_eq!(
+            field_u64(r#"{"allotment":"60000"}"#, "allotment"),
+            Some(60_000)
+        );
     }
 }

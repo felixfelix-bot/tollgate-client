@@ -148,7 +148,14 @@ fn hysteresis_keeps_a_good_incumbent() {
     let mut h = HashMap::new();
     h.insert("current".to_string(), healthy());
     h.insert("challenger".to_string(), healthy());
-    match decide(&[incumbent.clone(), challenger.clone()], &h, &caps("sat"), Some("current")).unwrap() {
+    match decide(
+        &[incumbent.clone(), challenger.clone()],
+        &h,
+        &caps("sat"),
+        Some("current"),
+    )
+    .unwrap()
+    {
         Decision::Buy { gateway_id, .. } => assert_eq!(gateway_id, "current"),
         other => panic!("expected Buy(current), got {other:?}"),
     }

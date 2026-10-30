@@ -15,7 +15,10 @@ struct FakePayer {
 
 impl LightningPayer for FakePayer {
     fn pay(&mut self, bolt11: &str, amount_sat: u64) -> Result<String, String> {
-        self.paid.lock().unwrap().push((bolt11.to_string(), amount_sat));
+        self.paid
+            .lock()
+            .unwrap()
+            .push((bolt11.to_string(), amount_sat));
         Ok("manual".into())
     }
 }
@@ -23,8 +26,10 @@ impl LightningPayer for FakePayer {
 const INVOICE: &str = r#"{"status":1,"quote":"q_1","invoice":"lnbc20n1example","mint_url":"https://mint.example","amount":2,"expiry":1893456000,"state":"UNPAID","access_granted":false}"#;
 const PENDING: &str = r#"{"status":1,"quote":"q_1","state":"PENDING","access_granted":false}"#;
 const GRANTED: &str = r#"{"status":1,"quote":"q_1","state":"PAID","access_granted":true,"allotment":60000,"metric":"milliseconds"}"#;
-const GRANT_FAILED: &str = r#"{"status":0,"error":"payment received, do not pay again","code":"access-grant-failed"}"#;
-const TABLE_FULL: &str = r#"{"status":0,"error":"too many unpaid invoices","code":"quote-table-full","retry_after":60}"#;
+const GRANT_FAILED: &str =
+    r#"{"status":0,"error":"payment received, do not pay again","code":"access-grant-failed"}"#;
+const TABLE_FULL: &str =
+    r#"{"status":0,"error":"too many unpaid invoices","code":"quote-table-full","retry_after":60}"#;
 
 fn fake_gate(replies: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -33,11 +38,16 @@ fn fake_gate(replies: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
     let seen2 = seen.clone();
     thread::spawn(move || {
         for (status, body) in replies {
-            let Ok((mut sock, _)) = listener.accept() else { return };
+            let Ok((mut sock, _)) = listener.accept() else {
+                return;
+            };
             let mut buf = [0u8; 4096];
             let n = sock.read(&mut buf).unwrap_or(0);
             let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            seen2.lock().unwrap().push(req.lines().next().unwrap_or("").to_string());
+            seen2
+                .lock()
+                .unwrap()
+                .push(req.lines().next().unwrap_or("").to_string());
             let resp = format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(), body
@@ -70,7 +80,12 @@ fn requests_pays_and_polls_until_the_gate_opens() {
     assert_eq!(paid[0].0, "lnbc20n1example");
     assert_eq!(paid[0].1, 2);
     // One POST to create, then GET polls: never a second POST.
-    let posts = seen.lock().unwrap().iter().filter(|l| l.starts_with("POST")).count();
+    let posts = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|l| l.starts_with("POST"))
+        .count();
     assert_eq!(posts, 1);
 }
 
@@ -89,7 +104,14 @@ fn a_grant_failure_keeps_polling_and_never_pays_twice() {
     let status = buy(&gate, 2, "https://mint.example", &mut payer, 2000, 0, 10).unwrap();
     assert!(status.access_granted);
     assert_eq!(paid.lock().unwrap().len(), 1);
-    assert_eq!(seen.lock().unwrap().iter().filter(|l| l.starts_with("POST")).count(), 1);
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.starts_with("POST"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -99,13 +121,18 @@ fn a_full_quote_table_is_a_refusal_with_its_retry_hint() {
     let mut payer = FakePayer { paid: paid.clone() };
 
     match buy(&gate, 2, "https://mint.example", &mut payer, 2000, 0, 3) {
-        Err(LightningError::Refused { code, retry_after, .. }) => {
+        Err(LightningError::Refused {
+            code, retry_after, ..
+        }) => {
             assert_eq!(code, "quote-table-full");
             assert_eq!(retry_after, Some(60));
         }
         other => panic!("expected Refused, got {other:?}"),
     }
-    assert!(paid.lock().unwrap().is_empty(), "nothing to pay without an invoice");
+    assert!(
+        paid.lock().unwrap().is_empty(),
+        "nothing to pay without an invoice"
+    );
 }
 
 #[test]

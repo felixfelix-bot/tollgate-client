@@ -108,7 +108,10 @@ fn number_after(hay: &str, key: &str) -> Option<u64> {
     let mut rest = &hay[hay.find(&k)? + k.len()..];
     rest = rest.trim_start_matches(|c: char| c == ':' || c == ',' || c == '[' || c.is_whitespace());
     if let Some(stripped) = rest.strip_prefix('"') {
-        let digits: String = stripped.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = stripped
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         return digits.parse().ok();
     }
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -184,15 +187,24 @@ fn by_code(code: &str, message: &str) -> PaymentOutcome {
     let m = message.to_string();
     let c = code.to_string();
     if refused.contains(&code) {
-        PaymentOutcome::Refused { code: c, message: m }
+        PaymentOutcome::Refused {
+            code: c,
+            message: m,
+        }
     } else if retryable.contains(&code) {
-        PaymentOutcome::Retryable { code: c, message: m }
+        PaymentOutcome::Retryable {
+            code: c,
+            message: m,
+        }
     } else if ambiguous.contains(&code) {
         PaymentOutcome::Ambiguous {
             reason: format!("{code}: {message}"),
         }
     } else if lost.contains(&code) {
-        PaymentOutcome::ValueLost { code: c, message: m }
+        PaymentOutcome::ValueLost {
+            code: c,
+            message: m,
+        }
     } else {
         PaymentOutcome::Ambiguous {
             reason: format!("unrecognised code {code}: {message}"),

@@ -93,6 +93,13 @@ fn load_seed(path: &str) -> Result<[u8; 64], String> {
     Ok(seed)
 }
 
+/// "There is nothing to buy here" is not an error. Distinguishing the two is
+/// what keeps `systemctl status` honest: red only when something is wrong.
+fn not_a_gate(error: &str) -> bool {
+    error.starts_with("connect ")                       // refused / unreachable
+        || (error.contains("answered HTTP") && error.contains("advert probe")) // 404/502, a normal web server
+}
+
 /// Flag first, then the environment, so systemd's EnvironmentFile is load-bearing
 /// rather than decorative.
 fn opt(args: &[String], flag: &str, env_key: &str) -> Option<String> {
@@ -160,6 +167,10 @@ fn lightning_main(args: &[String], gate: &str) -> ExitCode {
                 }
             }
         }
+        Err(e) if not_a_gate(&e) => {
+            println!("RESULT state=not-a-gate reason={e}");
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             println!("ERROR {e}");
             ExitCode::FAILURE
@@ -175,7 +186,10 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let lightning_mode = args.iter().any(|a| a == "--lightning");
+    // The Lightning lane needs no wallet, so it must be reachable from the
+    // packaged service without a token file: TOLLGATE_MODE=lightning.
+    let lightning_mode = args.iter().any(|a| a == "--lightning")
+        || std::env::var("TOLLGATE_MODE").map(|m| m == "lightning").unwrap_or(false);
     // --auto asks the kernel where traffic is actually going: a gate is only a
     // gate if the default route points at it.
     let gate = match arg(&args, "--gate") {
@@ -188,8 +202,9 @@ fn main() -> ExitCode {
                     url
                 }
                 None => {
-                    eprintln!("no IPv4 default gateway; be online, or pass --gate");
-                    return ExitCode::from(69);
+                    // Not a failure: there is simply no link to pay for.
+                    println!("RESULT state=no-gateway");
+                    return ExitCode::SUCCESS;
                 }
             }
         }

@@ -10,7 +10,9 @@ BIN="$HERE/target/release/tollgate-agent"
 [ -x "$BIN" ] || { echo "build first: cargo build --release --bin tollgate-agent" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || { echo "install.sh must run as root" >&2; exit 1; }
 
-command -v tollgate >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin tollgate
+# Idempotent: an existing service user is expected, not an error. (`set -e`
+# turns a failed useradd into an aborted install, which is how this bit me.)
+id -u tollgate >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin tollgate
 
 install -Dm0755 "$BIN" "$PREFIX/bin/tollgate-agent"
 install -Dm0644 "$HERE/packaging/systemd/tollgate-agent.service" /etc/systemd/system/tollgate-agent.service

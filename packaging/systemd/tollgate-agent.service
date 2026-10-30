@@ -11,7 +11,8 @@ ConditionPathExists=/etc/tollgate/agent.env
 Type=oneshot
 EnvironmentFile=/etc/tollgate/agent.env
 # A fresh attempt id per invocation; the journal is what stops a duplicate.
-ExecStart=/bin/sh -c 'exec /usr/local/bin/tollgate-agent --auto --journal /var/lib/tollgate/journal.txt --attempt-id "$(date +%s)"'
+# %%s, not %s: systemd expands a bare %s to the login shell before sh sees it.
+ExecStart=/bin/sh -c 'exec /usr/local/bin/tollgate-agent --auto --journal /var/lib/tollgate/journal.txt --attempt-id "$(date +%%s)"'
 User=tollgate
 Group=tollgate
 StateDirectory=tollgate
@@ -21,7 +22,9 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is required: `ip route` reads the kernel's routing table over it.
+# Without it the daemon cannot see the gateway and reports none.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

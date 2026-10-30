@@ -202,8 +202,24 @@ fn lightning_main(args: &[String], gate: &str) -> ExitCode {
     }
 }
 
+#[cfg(all(feature = "cdk", feature = "persistence", target_os = "linux"))]
+mod recording;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
+    // Dispatch before help, environment, route discovery, wallet or legacy runner.
+    if args
+        .iter()
+        .any(|a| a.starts_with("--recording") || a.starts_with("--simulation-"))
+    {
+        #[cfg(all(feature = "cdk", feature = "persistence", target_os = "linux"))]
+        return recording::main(&args);
+        #[cfg(not(all(feature = "cdk", feature = "persistence", target_os = "linux")))]
+        {
+            println!("{{\"mode\":\"simulated\",\"outcome\":\"refused\",\"error\":\"recording requires Linux, cdk and persistence features\"}}");
+            return ExitCode::from(78);
+        }
+    }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("usage: tollgate-agent --gate <url> --token-file <path> --journal <path> --attempt-id <id> \
 [--max-cost-per-minute N] [--daily-budget N] [--spent-today N] [--unit sat] [--timeout-ms N]");

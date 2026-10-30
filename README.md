@@ -2,9 +2,8 @@
 
 TollGate **v1** client core, shared by two shells:
 
-- **Android** — Kotlin/Jetpack Compose + foreground service, Wi-Fi via
-  `WifiNetworkSuggestion` (stock Android cannot silently auto-join; the OS
-  mediates, the app buys the moment it is joined).
+- **Android** — Java activity + discovery-only foreground service. Automatic
+  spending is disabled; `WifiNetworkSuggestion` is not implemented.
 - **Debian** — `tollgate-agent` daemon + `tollgate-ctl` (CLI/TUI) + a
   NetworkManager dispatcher, which *can* join and switch fully automatically.
 
@@ -177,9 +176,13 @@ describe={"gate":"http://127.0.0.1:18212/","offers":[{"unit":"sat","price_per_st
           "decision":"Buy { gateway_id: …, steps: 1, cost: 2.0, unit: \"sat\" }"}
 ```
 
-Not done yet on this platform: no auto-buy, no `WifiNetworkSuggestion` (Android 10+
-forbids an ordinary app from joining a network silently), no background service.
-The UI says what it measured and nothing more.
+The foreground service polls discovery every 60 seconds, but **does not spend**,
+even if a note was saved by an older build. Android 14 dataSync permission is
+required; a refused foreground start stops the service without starting a worker.
+There is no automatic-spend opt-in in this build: persistent budget accounting,
+stable token intent IDs and ambiguity reconciliation are not implemented. JNI
+`Core.buy` remains an experimental API, not a production payment path.
+No `WifiNetworkSuggestion` is implemented. See [verification and limitations](docs/android-verification.md).
 
 ## Portability
 
@@ -198,15 +201,37 @@ load-bearing fact for the Android work: discovery, pricing, caps, purchase,
 classification and the Lightning lane all port as-is. Only the cdk wallet needs
 the NDK, and the Lightning lane does not need the wallet.
 
+## Capped purchase: one send, then the truth
+
+`capped_purchase::purchase_once` is the vertical step: read `/session-state`
+(preflight, and refuse if access already exists), send the verified token
+**exactly once** through the bound transport, poll the session a bounded number
+of times, and write one JSON evidence file that contains no bearer bytes.
+
+The rule it enforces: **a grant notice is not access.** No verdict reports access:
+`Verdict::GrantAndSessionActive` (legacy Rust name) means a usable kind-1022
+notice *and* a context-consistent gate-reported `active` session, and serialises
+as `grant_and_gate_reported_active_unattributed`. A grant with no session
+is `GrantWithoutSession` (money may be gone, access not obtained); an ambiguous
+or pre-send-refused delivery is `Unresolved` and keeps its exposure.
+
+`RefusedBeforeSend` maps to `Unknown` because `send_validated` already committed
+the irreversible send mark before the transport ran. Releasing that exposure
+needs **manual reconciliation** against the mint (NUT-07); the preflight session
+read is the mitigation that keeps the case rare. See
+[docs/capped-purchase.md](docs/capped-purchase.md).
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);
 the Cashu wallet itself (`cashubtc/cdk`) behind a `Wallet` trait, plus NUT-07
-reconciliation for ambiguous attempts — after the recon verdict from
-`OpenTollGate/tollgate-module-basic-go`.
+automatic reconciliation for ambiguous attempts — after the recon verdict from
+`OpenTollGate/tollgate-module-basic-go`. No shell calls `purchase_once` yet.
 
 ## Test
 
 ```bash
-cargo test          # 8 tests: math, ranking, reliability, caps, hysteresis, min_steps
+cargo test
+cargo test --no-default-features --features android
+python3 tests/android_service_test.py  # requires javac/java on PATH
 ```

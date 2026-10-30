@@ -3153,7 +3153,12 @@ dependencies = [
  "cdk",
  "cdk-sqlite",
  "jni",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "socket2",
  "tokio",
+ "url",
 ]
 
 [[package]]

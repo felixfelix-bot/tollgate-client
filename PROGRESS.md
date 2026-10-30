@@ -1,5 +1,15 @@
 # Progress
 
+## Linux process-crash follow-up
+
+- Six parent scenarios plus subprocess entrypoint; deterministic pipe handshakes,
+  20-second checkpoint deadlines and verified SIGKILL exits. No sleeps.
+- Actual pre-commit/post-commit reserve and settle, repeated replay, spilled
+  uncommitted SQL rollback, stale-open competitor, interrupted real initialization.
+- Persistence/all-feature suites: 76 top-level passed each; minimal: 61.
+- No production changes. Process crashes only, not power-loss/Android proof.
+- Branch pr/budget-crash-tests based on 5150c24; no second PR created.
+
 ## Durable budget-store foundation
 
 - Added opt-in persistence feature with versioned SQLite accounting, checked

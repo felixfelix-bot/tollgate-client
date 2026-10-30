@@ -1,5 +1,48 @@
 # Safety milestone report
 
+## Linux process-crash follow-up
+
+Read the existing tests, cold review and payment safety design first. Added six
+parent scenarios plus one subprocess entrypoint. Existing production behavior is
+being regression-tested; no production change or fabricated RED evidence claimed.
+
+- Pipe handshakes have 20-second receive deadlines; child cleanup kills/reaps on
+  failure. Explicit deaths assert Unix signal 9, not graceful drop/panic exits.
+- Real reserve/settle tested before invocation, at rollback-journal sync before
+  commit completes, and after successful API return. Reopen/replay repeats three
+  times; settlement stays at 7, not 14; prior reservation remains 9 if interrupted.
+- Raw SQLite transaction changes reservation, operations and watermark, forces
+  dirty-page spill with real sqlite3_db_cacheflush, then dies without rollback.
+  Reopen restores committed exposure and allows the original day.
+- Competing process opens before another process reserves, then tries admission
+  after holder death: 2 against outstanding 9/cap 10 must return CapExceeded.
+- Actual create is interrupted after initial file sync and schema-journal sync;
+  repeated open and create both fail closed without deleting/re-enrolling.
+
+The Linux LD_PRELOAD observer in tests/support/crash_sync.c forwards successful
+real fsync/fdatasync first, checks the exact /proc/self/fd pathname, signals the
+parent, then blocks for SIGKILL. It does not fake syscall success, alter writes,
+locking or SQLite configuration, or install any production hook. cc builds it
+with warnings-as-errors. This samples two initialization boundaries and one
+pre-commit boundary, not every syscall. Fully committed creation should reopen.
+The raw-SQL test's small cache is only to exercise spill; it is complementary
+SQLite rollback evidence, not a production cache-size claim.
+
+Actual executions, exit 0 each:
+- cargo test --locked --no-default-features --features persistence: 76 top-level passed.
+- cargo test --locked --all-features: 76 top-level passed.
+- cargo test --locked --no-default-features: 61 passed (crash suite disabled).
+- Targeted budget_crash: 7 passed (six scenarios and child entrypoint).
+Counts exclude existing budget_store subprocess test invocations. Full suites
+run under timeout 240. Logs: manager scratch budget-crash-{persistence,all,minimal}.log.
+Existing unused imports/dead-code warnings remain; no coverage gain inferred.
+
+Scope is Linux process-kill/reopen, NOT power-loss, kernel-cache loss, hardware
+fsync honesty, Android/NDK, network filesystem or payment readiness evidence.
+Linux tests require cc, dynamic loading and /proc; other platforms compile them
+out. No payment/device/router changes; discovery-only remains. No second PR.
+
+
 ## Durable budget foundation evidence
 
 - Initial RED: `cargo test --no-default-features --features persistence --test budget_store`

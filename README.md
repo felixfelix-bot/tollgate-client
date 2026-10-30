@@ -30,11 +30,19 @@ validator because this side pays: an advert with no metric or no usable
 cannot be paid — wrong asset type, zero price, no unit, no mint — is **dropped**
 rather than guessed at.
 
+`purchase::classify_response` classifies the gate's answer — `200`+kind `1022` is a
+grant, `400`+kind `21023` is a **definitive refusal**, and a `500`, an unparseable
+`200`, or a timeout is **ambiguous** (the note may already be spent). Treating
+that last class as a refusal is how a customer pays twice. `next_state` is a
+forward-only state machine per attempt, and `intent_key` gives the journal a
+stable handle that never stores the bearer token.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);
-`purchase` (Cashu via `cashubtc/cdk`, NUT-07 reconciliation, crash-safe intents)
-after the recon verdict from `OpenTollGate/tollgate-module-basic-go`.
+the Cashu wallet itself (`cashubtc/cdk`) behind a `Wallet` trait, plus NUT-07
+reconciliation for ambiguous attempts — after the recon verdict from
+`OpenTollGate/tollgate-module-basic-go`.
 
 ## Test
 

@@ -9,4 +9,5 @@
 //! docs/client/v1-client-contract.md.
 pub mod discovery;
 pub mod policy;
+pub mod purchase;
 pub mod scoring;

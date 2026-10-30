@@ -1127,11 +1127,118 @@ fn safety_reflected_metric_is_not_recorded() {
         }),
         calls: 0,
     });
+    // The gate answered with a well-formed notice in a unit we do not speak: it
+    // granted, so this is Unknown (exposure retained), not a refusal. What must
+    // never happen is the echoed value reaching the record.
     assert_eq!(
         transport.send(b"cashuA_echoed_bearer"),
-        DeliveryObservation::RefusalOrMalformed
+        DeliveryObservation::Unknown
     );
     assert!(!serde_json::to_string(transport.last().unwrap())
         .unwrap()
         .contains("cashuA_echoed_bearer"));
+}
+
+// ---- regression: an unrecognised unit must not read as a refusal -----------
+//
+// A gate that granted is not a gate that refused. When the answer is a
+// well-formed kind-1022 notice whose only defect is a unit this client does not
+// know, the honest classification is Unknown/Unresolved: money may be gone and
+// the session may be open. RefusalOrMalformed -> Refused would assert the
+// opposite of what happened.
+#[test]
+fn unrecognised_metric_unit_is_unknown_not_refused() {
+    for unit in ["seconds", "megabytes", "bytes_per_second", ""] {
+        let body = format!(r#"{{"kind":1022,"tags":[["allotment","60000"],["metric","{unit}"]]}}"#);
+        let (delivery, notice, metric) = classify(SendOutcome::Complete {
+            status: 200,
+            body: body.into_bytes(),
+        });
+        assert_eq!(
+            delivery,
+            DeliveryObservation::Unknown,
+            "unit {unit:?} must not be read as a refusal"
+        );
+        assert!(notice.is_none(), "unit {unit:?}: no notice is trusted");
+        assert!(
+            metric.is_none(),
+            "unit {unit:?}: an unsupported unit is never copied into evidence"
+        );
+    }
+}
+
+/// The reason tag itself, read from the durable observation record.
+#[test]
+fn unsupported_metric_keeps_a_distinguishable_reason() {
+    for unit in ["seconds", "megabytes", ""] {
+        let body = format!(r#"{{"kind":1022,"tags":[["allotment","60000"],["metric","{unit}"]]}}"#);
+        let mut transport = ObservingTransport::new(Fake {
+            outcome: Some(SendOutcome::Complete {
+                status: 200,
+                body: body.into_bytes(),
+            }),
+            calls: 0,
+        });
+        let delivery = VerifiedBytesTransport::send(&mut transport, b"token-bytes");
+        assert_eq!(delivery, DeliveryObservation::Unknown, "unit {unit:?}");
+        let record = transport.last().expect("observation recorded");
+        assert_eq!(
+            record.detail.as_deref(),
+            Some("unsupported_metric"),
+            "unit {unit:?}: the reconciler must be able to tell this from a real refusal"
+        );
+        // And the reflected value never reaches the record. For the empty unit the
+        // needle would be `""`, which legitimately appears for absent fields, so
+        // that case asserts on the non-empty units only.
+        if !unit.is_empty() {
+            assert!(!serde_json::to_string(record)
+                .unwrap()
+                .contains(&format!("\"{unit}\"")));
+        }
+    }
+}
+
+// The other half of the invariant: shapes that really are refusals stay refusals,
+// so the new branch cannot swallow them.
+#[test]
+fn genuine_refusals_still_classify_as_refusals() {
+    for (name, body) in [
+        (
+            "wrong kind",
+            r#"{"kind":21023,"tags":[["code","payment-error-token-spent"]]}"#,
+        ),
+        ("not json", "<html>captive portal</html>"),
+        ("empty body", ""),
+        (
+            "missing allotment",
+            r#"{"kind":1022,"tags":[["metric","bytes"]]}"#,
+        ),
+        (
+            "zero allotment",
+            r#"{"kind":1022,"tags":[["allotment","0"],["metric","bytes"]]}"#,
+        ),
+        (
+            "bad allotment",
+            r#"{"kind":1022,"tags":[["allotment","abc"],["metric","bytes"]]}"#,
+        ),
+        (
+            "bad device",
+            r#"{"kind":1022,"tags":[["allotment","1"],["metric","bytes"],["device-identifier","not-a-mac"]]}"#,
+        ),
+        (
+            "duplicate metric",
+            r#"{"kind":1022,"tags":[["allotment","1"],["metric","bytes"],["metric","milliseconds"]]}"#,
+        ),
+    ] {
+        let (delivery, notice, _) = classify(SendOutcome::Complete {
+            status: 200,
+            body: body.as_bytes().to_vec(),
+        });
+        assert_eq!(
+            delivery,
+            DeliveryObservation::RefusalOrMalformed,
+            "{name} must stay a refusal"
+        );
+        assert!(notice.is_none(), "{name}");
+    }
 }

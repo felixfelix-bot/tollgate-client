@@ -128,6 +128,28 @@ Caps and funding come from the environment when no flag is given, so
 `agent.env` is load-bearing rather than decorative (verified: cap 10 → granted,
 cap 0.5 → the gate is never asked).
 
+## It learns, and the learning survives a reboot
+
+`--history <path>` turns the run into a loop: every probe contributes a latency
+and throughput sample (it already paid for that round trip), and every purchase
+contributes a success or a refusal. Events are appended as JSONL and replayed
+through the same EWMA that live scoring uses, so a reload is the same fold —
+there is one code path, not two.
+
+```
+$ … --history ~/.tollgate/history.jsonl --attempt-id 100   # first run
+HISTORY gw=http://…/ ok=2 fail=0 rtt_ms=1.9 kbps=699 p=0.750
+$ … --attempt-id 101                                       # second run
+HISTORY gw=http://…/ ok=4 fail=0 rtt_ms=1.8 kbps=734 p=0.833
+$ … --max-cost-per-minute 0.5                              # too expensive
+HISTORY gw=http://…/ ok=5 fail=0 rtt_ms=1.6 kbps=872 p=0.857
+RESULT state=not-attempted
+```
+
+`p` is the Beta(1,1)-smoothed success probability that `value = quality / cost ×
+P(success)` divides by. A truncated last line is skipped and counted, never
+fatal: a power cut costs one sample.
+
 ## Portability
 
 The cdk wallet is a cargo feature (`default = ["cdk"]`). Without it the whole

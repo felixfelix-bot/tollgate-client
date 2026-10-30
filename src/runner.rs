@@ -105,6 +105,11 @@ pub struct RunReport {
     pub advert_offers: usize,
     pub decision: String,
     pub result: Option<AttemptResult>,
+    /// Latency and throughput of the advert probe itself. Free measurement: we
+    /// already pay for this round trip, so the quality sample comes from it
+    /// rather than from a second poll.
+    pub probe_rtt_ms: f64,
+    pub probe_kbps: f64,
 }
 
 /// Probe, decide, buy. `attempt_id` must be unique per attempt (the caller's clock
@@ -118,7 +123,14 @@ pub fn run_once(
     attempt_id: &str,
     timeout_ms: u64,
 ) -> Result<RunReport, String> {
+    let probe_started = std::time::Instant::now();
     let (status, body) = http::request("GET", gate_url, None, timeout_ms)?;
+    let probe_rtt_ms = probe_started.elapsed().as_secs_f64() * 1000.0;
+    let probe_kbps = if probe_rtt_ms > 0.0 {
+        (body.len() as f64 * 8.0) / probe_rtt_ms
+    } else {
+        0.0
+    };
     if status != 200 {
         return Err(format!(
             "{gate_url} answered HTTP {status} on the advert probe"
@@ -171,7 +183,70 @@ pub fn run_once(
         advert_offers: offers.len(),
         decision: reason,
         result: outcome,
+        probe_rtt_ms,
+        probe_kbps,
     })
+}
+
+/// Probe, decide, buy — and write down what happened.
+///
+/// The scores are only as good as the events behind them, so every run records a
+/// probe sample (it already paid for that round trip) plus the purchase outcome.
+/// Histories are loaded from the same file, which is what makes the 20 %
+/// hysteresis and the success probability mean anything across restarts.
+pub fn run_recorded(
+    gate_url: &str,
+    caps: &Caps,
+    store: &mut crate::history::Store,
+    wallet: &mut dyn Wallet,
+    journal: &mut dyn Journal,
+    attempt_id: &str,
+    timeout_ms: u64,
+) -> Result<RunReport, String> {
+    use crate::history::Event;
+    use crate::purchase::IntentState;
+
+    let histories = store.load();
+    let outcome = run_once(
+        gate_url, caps, &histories, wallet, journal, attempt_id, timeout_ms,
+    );
+
+    match &outcome {
+        Ok(report) => {
+            store.record(&Event::Probe {
+                gateway_id: report.gate_url.clone(),
+                rtt_ms: report.probe_rtt_ms,
+                kbps: report.probe_kbps,
+            })?;
+            match &report.result {
+                Some(AttemptResult::Finished { key, state, .. }) => {
+                    if *state == IntentState::Granted {
+                        store.record(&Event::Granted {
+                            gateway_id: report.gate_url.clone(),
+                        })?;
+                    } else {
+                        store.record(&Event::Refused {
+                            gateway_id: report.gate_url.clone(),
+                            code: format!("{}({key})", state.as_str()),
+                        })?;
+                    }
+                }
+                Some(AttemptResult::AlreadyAttempted { .. })
+                | Some(AttemptResult::NotAttempted { .. })
+                | None => {}
+            }
+        }
+        // Only "we could not reach it" is evidence about the gateway. A malformed
+        // advert is evidence about the gate's software, and is not counted here.
+        Err(e) if e.starts_with("connect ") => {
+            store.record(&Event::Unreachable {
+                gateway_id: gate_url.to_string(),
+            })?;
+        }
+        Err(_) => {}
+    }
+
+    outcome
 }
 
 /// Pull `["name","v","v"]` arrays out of an event body. The core parser wants

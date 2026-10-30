@@ -16,7 +16,9 @@ use tollgate_client_core::cdk_wallet::CdkFunding;
 use tollgate_client_core::lightning::LightningPayer;
 use tollgate_client_core::policy::Caps;
 use tollgate_client_core::purchase::IntentState;
-use tollgate_client_core::runner::{run_lightning, run_once, FileJournal, FileWallet};
+use tollgate_client_core::runner::{
+    run_lightning, run_once, run_recorded, FileJournal, FileWallet,
+};
 
 /// Prints the invoice for a human to pay with any wallet, then lets the poll
 /// loop find the grant. A real payer (an LN node over NIP-47/REST) implements the
@@ -189,7 +191,9 @@ fn main() -> ExitCode {
     // The Lightning lane needs no wallet, so it must be reachable from the
     // packaged service without a token file: TOLLGATE_MODE=lightning.
     let lightning_mode = args.iter().any(|a| a == "--lightning")
-        || std::env::var("TOLLGATE_MODE").map(|m| m == "lightning").unwrap_or(false);
+        || std::env::var("TOLLGATE_MODE")
+            .map(|m| m == "lightning")
+            .unwrap_or(false);
     // --auto asks the kernel where traffic is actually going: a gate is only a
     // gate if the default route points at it.
     let gate = match arg(&args, "--gate") {
@@ -283,15 +287,47 @@ fn main() -> ExitCode {
         .unwrap_or(3000);
     let histories: HashMap<String, _> = HashMap::new();
 
-    match run_once(
-        &gate,
-        &caps,
-        &histories,
-        &mut wallet,
-        &mut journal,
-        &attempt_id,
-        timeout_ms,
-    ) {
+    // With --history the run both *uses* the record and *extends* it, which is
+    // what makes reliability and quality mean something across restarts.
+    let mut store =
+        opt(&args, "--history", "TOLLGATE_HISTORY").map(tollgate_client_core::history::Store::open);
+    let run = match store.as_mut() {
+        Some(s) => run_recorded(
+            &gate,
+            &caps,
+            s,
+            wallet.as_mut(),
+            &mut journal,
+            &attempt_id,
+            timeout_ms,
+        ),
+        None => run_once(
+            &gate,
+            &caps,
+            &histories,
+            wallet.as_mut(),
+            &mut journal,
+            &attempt_id,
+            timeout_ms,
+        ),
+    };
+    if let Some(s) = store.as_mut() {
+        for (id, h) in s.load() {
+            println!(
+                "HISTORY gw={id} ok={} fail={} rtt_ms={:.1} kbps={:.0} p={:.3}",
+                h.successes,
+                h.failures,
+                h.rtt_ms,
+                h.kbps,
+                h.success_probability()
+            );
+        }
+        if s.skipped() > 0 {
+            eprintln!("warning: {} unreadable history line(s)", s.skipped());
+        }
+    }
+
+    match run {
         Ok(report) => {
             println!(
                 "PROBE gate={} offers={} decision={}",

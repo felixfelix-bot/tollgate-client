@@ -8,9 +8,19 @@
 pub fn field_str(body: &str, key: &str) -> Option<String> {
     let k = format!("\"{key}\"");
     let rest = &body[body.find(&k)? + k.len()..];
-    let after = &rest[rest.find('"')? + 1..];
-    let end = after.find('"')?;
-    Some(after[..end].to_string())
+    let start = rest.find('"')? + 1;
+    let bytes = rest.as_bytes();
+    let mut i = start;
+    let mut escaped = false;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if !escaped => escaped = true,
+            b'"' if !escaped => return Some(rest[start..i].to_string()),
+            _ => escaped = false,
+        }
+        i += 1;
+    }
+    None
 }
 
 pub fn field_u64(body: &str, key: &str) -> Option<u64> {
@@ -26,6 +36,19 @@ pub fn field_u64(body: &str, key: &str) -> Option<u64> {
     }
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
+}
+
+pub fn field_f64(body: &str, key: &str) -> Option<f64> {
+    let k = format!("\"{key}\"");
+    let mut rest = &body[body.find(&k)? + k.len()..];
+    rest = rest.trim_start_matches(|c: char| c == ':' || c == ' ' || c == '\t');
+    let token: String = rest
+        .chars()
+        .take_while(|c| {
+            c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+' || *c == 'e' || *c == 'E'
+        })
+        .collect();
+    token.parse().ok()
 }
 
 pub fn field_bool(body: &str, key: &str) -> Option<bool> {

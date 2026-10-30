@@ -11,6 +11,7 @@ pub mod agent;
 #[cfg(feature = "cdk")]
 pub mod cdk_wallet;
 pub mod discovery;
+pub mod history;
 pub mod http;
 pub mod json;
 pub mod lightning;

@@ -23,11 +23,18 @@ Deliberate rules:
 - `max_cost_per_minute` and the daily budget are gates evaluated before value,
   and crossing either returns `Prompt`, never a silent purchase.
 
+`discovery::parse_advertisement` parses the module's own kind:10021 tag grammar
+(dependency-free: the shell decodes JSON). It is stricter than the merchant's
+validator because this side pays: an advert with no metric or no usable
+`step_size` is **rejected** (its price cannot become a rate), and an offer that
+cannot be paid — wrong asset type, zero price, no unit, no mint — is **dropped**
+rather than guessed at.
+
 ## Pending
 
-`discovery` (kind:10021 parse, `:2121` probe, probe-IE hint) and `purchase`
-(Cashu via `cashubtc/cdk`, NUT-07 reconciliation) land after the recon verdict —
-the v1 client contract is being extracted from `OpenTollGate/tollgate-module-basic-go`.
+`:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);
+`purchase` (Cashu via `cashubtc/cdk`, NUT-07 reconciliation, crash-safe intents)
+after the recon verdict from `OpenTollGate/tollgate-module-basic-go`.
 
 ## Test
 

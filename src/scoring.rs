@@ -19,7 +19,7 @@ pub enum Metric {
     Bytes,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Offer {
     pub gateway_id: String,
     pub unit: String,

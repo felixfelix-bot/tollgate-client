@@ -7,5 +7,6 @@
 //!
 //! Protocol (discovery/purchase) lands in later modules; see
 //! docs/client/v1-client-contract.md.
+pub mod discovery;
 pub mod policy;
 pub mod scoring;

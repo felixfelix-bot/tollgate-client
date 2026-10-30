@@ -43,6 +43,30 @@ minted, the attempt is journalled **before** the first network call, the answer 
 classified, and an ambiguous answer is reconciled against the mint instead of
 being retried.
 
+## The Debian shell (runnable today)
+
+```bash
+cargo build --release --bin tollgate-agent
+tollgate-agent --gate http://192.168.50.205:2121 \
+               --token-file /run/secrets/note \
+               --journal ~/.tollgate/journal.txt \
+               --attempt-id "$(date +%s)" \
+               --max-cost-per-minute 2 --daily-budget 100
+```
+
+It probes the advert, prices it, applies the caps, buys, classifies the answer
+and journals the attempt — over a real socket, with **no dependencies**: the v1
+gate is plain HTTP `:2121`, so `std::net::TcpStream` is enough. Exit `0` granted,
+`2` not attempted / refused / already attempted, `1` error.
+
+Two honest boundaries, both named in the code rather than papered over:
+- the wallet is a `FileWallet` holding one pre-minted token; it **cannot answer
+  NUT-07**, so an ambiguous answer surfaces as an error instead of a guess. The
+  CDK wallet is the next deliverable;
+- `gateway_id` is stamped with the gate URL because the advert carries no
+  identity of its own. It works, but identity and address should be separate
+  fields before multi-gateway ranking is meaningful.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

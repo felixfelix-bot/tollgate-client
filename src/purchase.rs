@@ -50,6 +50,35 @@ pub enum IntentState {
     Unspent,
 }
 
+impl IntentState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IntentState::Pending => "pending",
+            IntentState::Granted => "granted",
+            IntentState::Refused => "refused",
+            IntentState::Retryable => "retryable",
+            IntentState::Ambiguous => "ambiguous",
+            IntentState::Lost => "lost",
+            IntentState::Spent => "spent",
+            IntentState::Unspent => "unspent",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.trim() {
+            "pending" => IntentState::Pending,
+            "granted" => IntentState::Granted,
+            "refused" => IntentState::Refused,
+            "retryable" => IntentState::Retryable,
+            "ambiguous" => IntentState::Ambiguous,
+            "lost" => IntentState::Lost,
+            "spent" => IntentState::Spent,
+            "unspent" => IntentState::Unspent,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransitionError {
     pub reason: String,

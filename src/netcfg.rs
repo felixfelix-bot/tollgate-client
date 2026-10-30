@@ -51,11 +51,11 @@ mod tests {
 
     #[test]
     fn finds_the_v4_default_route() {
-        let table = "default via 192.168.50.1 dev wlan0 proto dhcp src 192.168.50.44 metric 600\n\
-                     192.168.50.0/24 dev wlan0 proto kernel scope link src 192.168.50.44 metric 600\n";
+        let table = "default via <gateway-ip> dev wlan0 proto dhcp src 192.0.2.44 metric 600\n\
+                     192.168.50.0/24 dev wlan0 proto kernel scope link src 192.0.2.44 metric 600\n";
         assert_eq!(
             parse_default_gateway(table).as_deref(),
-            Some("192.168.50.1")
+            Some("<gateway-ip>")
         );
     }
 
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn an_address_becomes_the_portal_url() {
-        assert_eq!(gate_url("192.168.50.205"), "http://192.168.50.205:2121/");
+        assert_eq!(gate_url("<router-ip>"), "http://<router-ip>:2121/");
         assert_eq!(
             gate_url("http://198.51.100.7:2121/"),
             "http://198.51.100.7:2121/"

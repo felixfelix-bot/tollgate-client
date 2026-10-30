@@ -47,7 +47,7 @@ being retried.
 
 ```bash
 cargo build --release --bin tollgate-agent
-tollgate-agent --gate http://192.168.50.205:2121 \
+tollgate-agent --gate http://<router-ip>:2121 \
                --token-file /run/secrets/note \
                --journal ~/.tollgate/journal.txt \
                --attempt-id "$(date +%s)" \
@@ -70,7 +70,7 @@ Two honest boundaries, both named in the code rather than papered over:
 ## The Lightning lane (no wallet needed)
 
 ```bash
-tollgate-agent --lightning --gate http://192.168.50.205:2121 \
+tollgate-agent --lightning --gate http://<router-ip>:2121 \
                --max-cost-per-minute 2 --poll-ms 1000
 ```
 
@@ -87,7 +87,7 @@ keeps polling and never treats as a failed payment — that distinction is a tes
 
 ```bash
 head -c 64 /dev/urandom > ~/.tollgate/seed.bin && chmod 600 ~/.tollgate/seed.bin
-tollgate-agent --gate http://192.168.50.205:2121 --wallet cdk \
+tollgate-agent --gate http://<router-ip>:2121 --wallet cdk \
                --seed-file ~/.tollgate/seed.bin --wallet-db ~/.tollgate \
                --journal ~/.tollgate/journal.txt --attempt-id "$(date +%s)"
 ```
@@ -121,7 +121,7 @@ gate is only a gate if the kernel is routing through it:
 
 ```
 $ tollgate-agent --auto --journal … --attempt-id 9
-AUTO gateway 192.168.50.1 -> http://192.168.50.1:2121/
+AUTO gateway <gateway-ip> -> http://<gateway-ip>:2121/
 ```
 
 Caps and funding come from the environment when no flag is given, so

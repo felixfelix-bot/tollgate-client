@@ -13,9 +13,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- The interesting moment is a join with the screen off, so the watch has to
+         survive the app leaving the foreground. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="TollGate"
+        android:debuggable="true"
         android:usesCleartextTraffic="true"
         android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true">
@@ -24,5 +29,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".TollgateService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

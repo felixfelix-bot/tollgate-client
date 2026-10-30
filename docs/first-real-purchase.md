@@ -1,5 +1,10 @@
 # First purchase from a real TollGate
 
+> **Redaction note.** Device addresses, the router's LAN address and the client
+> MAC in this transcript are placeholders (`02:00:00:00:00:01`, `<router-ip>`,
+> `<gateway-ip>`). Do not "restore" them from a bench log — the topology lesson is
+> the artifact, the identifiers are somebody's network.
+
 Target: `10.99.99.1` — an OpenWrt VM (`Linux 6.6.86`, `br-lan`) running
 `tollgate-module-basic-go`, reachable over a host bridge (`tg-poc-br`,
 `10.99.99.2/24`). Mint: `https://testnut.cashu.exchange`, the one the router
@@ -28,7 +33,7 @@ RESULT key=13971daa9f5d0109 state=granted cost=1
                          device_identifier: Some("mac") }
 
 $ curl http://10.99.99.1:2121/session-state
-{"status":1,"mac":"72:fc:b0:ec:4c:09","state":"active"}
+{"status":1,"mac":"02:00:00:00:00:01","state":"active"}
 ```
 
 440,401,920 bytes = 20 × 21 MiB. Access really opened: the session went from

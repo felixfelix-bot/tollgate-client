@@ -1,3 +1,4 @@
+*.apk
+*.idsig
 /target
 Cargo.lock.bak
-*.apk

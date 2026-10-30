@@ -49,6 +49,85 @@ pub extern "system" fn Java_dev_tollgate_client_Core_describe(
     give(&mut env, out)
 }
 
+/// `Core.buy(gateUrl, token, attemptId, journalPath)` — spend one note.
+///
+/// The phone holds no mint and needs no Lightning backend for this: a Cashu note
+/// is the payment. Top-up is a token pasted from any wallet, which is the only
+/// moment the user has to care.
+#[no_mangle]
+pub extern "system" fn Java_dev_tollgate_client_Core_buy(
+    mut env: JNIEnv,
+    _class: JClass,
+    gate_url: JString,
+    token: JString,
+    attempt_id: JString,
+    journal_path: JString,
+) -> jstring {
+    let url = take(&mut env, &gate_url);
+    let token = take(&mut env, &token);
+    let attempt_id = take(&mut env, &attempt_id);
+    let journal_path = take(&mut env, &journal_path);
+
+    let caps = Caps {
+        preferred_unit: "sat".into(),
+        max_cost_per_minute: 2.0,
+        daily_budget: 100.0,
+        spent_today: 0.0,
+        switch_margin: 0.20,
+    };
+    let mut wallet = crate::runner::FileWallet { token };
+    let mut journal = match crate::runner::FileJournal::open(&journal_path) {
+        Ok(j) => j,
+        Err(e) => {
+            return give(
+                &mut env,
+                format!(r#"{{"error":"journal: {}"}}"#, e.replace('"', "'")),
+            )
+        }
+    };
+    let out = match crate::runner::run_once(
+        &url,
+        &caps,
+        &HashMap::new(),
+        &mut wallet,
+        &mut journal,
+        &attempt_id,
+        8000,
+    ) {
+        Ok(report) => {
+            let result = match report.result {
+                Some(crate::agent::AttemptResult::Finished { state, outcome, .. }) => format!(
+                    r#"{{"state":"{}","outcome":"{:?}"}}"#,
+                    state.as_str(),
+                    outcome
+                )
+                .replace('\n', " "),
+                Some(crate::agent::AttemptResult::AlreadyAttempted { state, .. }) => {
+                    format!(
+                        r#"{{"state":"{}","reason":"already-attempted"}}"#,
+                        state.as_str()
+                    )
+                }
+                Some(crate::agent::AttemptResult::NotAttempted { reason }) => {
+                    format!(
+                        r#"{{"state":"not-attempted","reason":"{}"}}"#,
+                        reason.replace('"', "'")
+                    )
+                }
+                None => r#"{"state":"not-attempted"}"#.to_string(),
+            };
+            format!(
+                r#"{{"gate":"{}","decision":"{:?}","result":{}}}"#,
+                url,
+                report.decision.replace('"', "'"),
+                result
+            )
+        }
+        Err(e) => format!(r#"{{"error":"{}"}}"#, e.replace('"', "'")),
+    };
+    give(&mut env, out)
+}
+
 /// `Core.capsFor(unit, maxPerMinute, dailyBudget)` — the caps, as the UI shows them.
 #[no_mangle]
 pub extern "system" fn Java_dev_tollgate_client_Core_capsFor(

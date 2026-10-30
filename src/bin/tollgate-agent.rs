@@ -1,7 +1,7 @@
 //! `tollgate-agent` — probe a gate, decide, buy, journal.
 //!
 //! Usage:
-//!   tollgate-agent --gate http://192.168.50.205:2121 \
+//!   tollgate-agent --gate http://<router-ip>:2121 \
 //!                  --token-file /run/secrets/note \
 //!                  --journal ~/.tollgate/journal.txt \
 //!                  --attempt-id "$(date +%s)" \

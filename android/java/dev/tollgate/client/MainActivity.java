@@ -2,6 +2,7 @@ package dev.tollgate.client;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -52,7 +53,34 @@ public class MainActivity extends Activity {
             }
         });
 
+        final android.widget.EditText token = new android.widget.EditText(this);
+        token.setHint("paste a Cashu note (cashuB…) to fund auto-buy");
+        token.setText(prefs().getString("token", ""));
+
+        Button save = new Button(this);
+        save.setText("Save note");
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs().edit().putString("token", token.getText().toString().trim()).apply();
+                out.setText("note saved — the background service will spend it");
+            }
+        });
+
+        Button service = new Button(this);
+        service.setText("Start background watch");
+        service.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startForegroundService(new Intent(MainActivity.this, TollgateService.class));
+                out.setText("watching in the background (60 s)");
+            }
+        });
+
         root.addView(scan);
+        root.addView(token);
+        root.addView(save);
+        root.addView(service);
         root.addView(out);
 
         ScrollView scroll = new ScrollView(this);
@@ -60,6 +88,10 @@ public class MainActivity extends Activity {
         setContentView(scroll);
 
         checkGateway();
+    }
+
+    private android.content.SharedPreferences prefs() {
+        return getSharedPreferences("tollgate", MODE_PRIVATE);
     }
 
     /** The gateway the kernel is actually routing through — same rule as --auto. */

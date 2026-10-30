@@ -12,6 +12,8 @@ pub mod agent;
 pub mod budget_store;
 #[cfg(feature = "cdk")]
 pub mod cdk_wallet;
+#[cfg(feature = "cdk")]
+pub mod validated_token;
 pub mod discovery;
 pub mod history;
 pub mod http;
@@ -24,5 +26,7 @@ pub mod policy;
 pub mod purchase;
 pub mod runner;
 pub mod scoring;
+#[cfg(all(feature = "cdk", any(target_os = "linux", target_os = "android")))]
+pub mod token_vault;
 #[cfg(feature = "persistence")]
 pub mod send_state;

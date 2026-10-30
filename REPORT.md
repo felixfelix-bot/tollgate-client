@@ -1,5 +1,17 @@
 # Safety milestone report
 
+## Offline validated-token and protected-vault milestone (base 920a462)
+
+- Added `validated_token` (CDK feature) and Linux/Android `token_vault`; no CLI/JNI/watcher wiring.
+- Cashu/CDK 0.18.3 locked types implement NUT-00 decoding, NUT-02 keyset consistency and canonical NUT-07 Y via CDK hash-to-curve. Trusted snapshots bind mint, unit, keyset and denomination keys; sums are checked, duplicate Y rejected and overlap compares mint + Y.
+- Typed adapter derives face value from decoded proofs, rejects unknown fee bounds before storing, and persists exact bytes before returning the dormant legacy plan.
+- Vault uses pinned directory descriptors, no-follow traversal, exclusive 0600 files under 0700 directory, SHA-256 verification and file/directory fsync. Existing objects never overwritten; unsafe ancestry, symlinks, hardlinks, missing/corrupt objects fail closed.
+- Worker TDD evidence: parser 7 failing tests then green; adapter 1 failing then green; vault 6 failed/1 passed then 7 green. Fixtures are synthetic proofs constructed with CDK hash-to-curve/signing, no real funds.
+- Independently rerun `cargo test --locked --all-features --quiet`: 103 top-level tests passed; `cargo test --locked --no-default-features --quiet`: 61 passed. New tests total 15. Read-only review found no blocking issue.
+- Coverage not measured: `cargo llvm-cov --version` failed because the subcommand is not installed. No coverage percentage claimed.
+
+Limits: structural validation is NOT issuer/DLEQ authentication, spend-state knowledge, spending-condition satisfaction, metadata freshness or network/entitlement authentication. Fee bound is explicitly trusted caller input. The old public mutable TrustedSendPlan remains bypassable and unfit for production callers. Vault is not encrypted or resistant to same-UID/root tampering or rollback; interrupted writes remain fail-closed residue, not auto-repaired. Host-only filesystem tests, no power-loss/Android persistence proof. Group-writable ancestors (including this host home) are deliberately rejected; tests use root-owned sticky /dev/shm. No mint/router calls, production funds, new PR or deployment.
+
 ## Send/terminal race correction (base 03bbbfed)
 
 Isolated branch `pr/send-terminal-race`; dirty main and reviewed source untouched.

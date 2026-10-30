@@ -25,6 +25,9 @@ serde_json = { version = "1", optional = true }
 rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
 cdk = { version = "0.18.3", optional = true }
 cdk-sqlite = { version = "0.18.3", optional = true }
+# Bound Linux transport: SO_BINDTODEVICE + source bind + connect deadline.
+# Already in the dependency graph (via rusqlite/tokio); `all` exposes bind_device.
+socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time"], optional = true }
 # Only for the Android shell: the JNI shim is a marshalling layer, not logic.
 jni = { version = "0.21.1", optional = true }

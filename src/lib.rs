@@ -8,6 +8,9 @@
 //! Protocol (discovery/purchase) lands in later modules; see
 //! docs/client/v1-client-contract.md.
 pub mod agent;
+/// Bound, single-attempt HTTP transport for verified token bytes (Linux only).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub mod bound_transport;
 #[cfg(feature = "persistence")]
 pub mod budget_store;
 #[cfg(feature = "cdk")]

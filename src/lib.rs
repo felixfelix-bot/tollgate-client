@@ -8,6 +8,8 @@
 //! Protocol (discovery/purchase) lands in later modules; see
 //! docs/client/v1-client-contract.md.
 pub mod agent;
+#[cfg(feature = "persistence")]
+pub mod budget_store;
 #[cfg(feature = "cdk")]
 pub mod cdk_wallet;
 pub mod discovery;

@@ -12,10 +12,9 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-# The cdk wallet is the only part of the core that needs a C compiler (rusqlite
-# bundles SQLite) and a multi-thread runtime. Gating it keeps everything else
-# pure Rust, which is what lets the same crate build for Debian, musl routers
-# and Android from one source tree.
+# SQLite backends need a C compiler. Persistence is explicitly opt-in;
+# builds without it have no durable budget store.
+rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
 cdk = { version = "0.18.3", optional = true }
 cdk-sqlite = { version = "0.18.3", optional = true }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time"], optional = true }
@@ -24,6 +23,7 @@ jni = { version = "0.21.1", optional = true }
 
 [features]
 default = ["cdk"]
+persistence = ["dep:rusqlite"]
 cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio"]
 # The JNI shim the Android shell loads. Deliberately independent of `cdk`: the
 # phone can buy over the Lightning lane with no wallet on the device.

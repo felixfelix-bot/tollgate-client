@@ -1,4 +1,27 @@
-# Android safety report
+# Safety milestone report
+
+## Durable budget foundation evidence
+
+- Initial RED: `cargo test --no-default-features --features persistence --test budget_store`
+  exited 101: missing budget_store module (compile RED, not behavioral evidence).
+- Independent read-only review identified incomplete-schema/logical-corruption
+  acceptance. Regression first failed `accepted DROP INDEX one_terminal` (101);
+  exact-schema and accounting validation then made it GREEN.
+- Final `cargo test --all-features`: 69 passed; persistence-only full suite:
+  `cargo test --no-default-features --features persistence`: 69 passed.
+- `cargo test --no-default-features`: 61 passed. Android host tests: 2 passed,
+  repeated ticks/restarts zero buys. rustfmt checks and git diff --check passed.
+- Coverage unavailable: `cargo llvm-cov --version` exited 101, command not installed.
+  No coverage percentage claimed. Existing unused-import/dead-code warnings remain.
+- Added src/budget_store.rs, tests/budget_store.rs, docs/budget-store.md, explicit
+  optional rusqlite feature and module export. No CLI/JNI payment wiring.
+- Limits: caller-authorized caps/units/days, private local filesystem, no malicious
+  external SQL writers or DB rollback. No proof/engine, forward-clock validation,
+  migration, partial settlement or NDK persistence acceptance. Watcher stays off.
+- Branch pr/durable-budget-store is based on d801a3f; manager must perform remote
+  mutations under repository workflow. No remote publication claimed by worker.
+
+# Prior Android safety report
 
 ## Outcome
 

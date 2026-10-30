@@ -3153,6 +3153,7 @@ dependencies = [
  "cdk",
  "cdk-sqlite",
  "jni",
+ "rusqlite",
  "tokio",
 ]
 

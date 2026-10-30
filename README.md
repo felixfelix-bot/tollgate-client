@@ -37,6 +37,12 @@ that last class as a refusal is how a customer pays twice. `next_state` is a
 forward-only state machine per attempt, and `intent_key` gives the journal a
 stable handle that never stores the bearer token.
 
+`agent::attempt_purchase` is the whole loop with the platform seams injected
+(`Wallet`, `GateTransport`, `Journal`): caps are checked **before** a token is
+minted, the attempt is journalled **before** the first network call, the answer is
+classified, and an ambiguous answer is reconciled against the mint instead of
+being retried.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

@@ -8,6 +8,7 @@ use tollgate_client_core::scoring::{GatewayHistory, Metric, Offer};
 fn ms_offer(id: &str, price_per_step: u64, step_ms: u64) -> Offer {
     Offer {
         gateway_id: id.to_string(),
+        mint_url: "https://mint.example".to_string(),
         unit: "sat".to_string(),
         metric: Metric::Milliseconds,
         price_per_step,
@@ -19,6 +20,7 @@ fn ms_offer(id: &str, price_per_step: u64, step_ms: u64) -> Offer {
 fn byte_offer(id: &str, price_per_step: u64, step_bytes: u64) -> Offer {
     Offer {
         gateway_id: id.to_string(),
+        mint_url: "https://mint.example".to_string(),
         unit: "sat".to_string(),
         metric: Metric::Bytes,
         price_per_step,

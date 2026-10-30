@@ -22,6 +22,9 @@ pub enum Metric {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Offer {
     pub gateway_id: String,
+    /// The mint this offer is paid from. Part of the offer's identity: a token
+    /// minted at another mint is not accepted by the gate.
+    pub mint_url: String,
     pub unit: String,
     pub metric: Metric,
     pub price_per_step: u64,

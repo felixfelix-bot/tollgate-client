@@ -148,6 +148,7 @@ pub fn parse_advertisement(kind: u64, tags: &[Vec<String>]) -> Result<Advertisem
     for raw in raw_offers {
         let candidate = Offer {
             gateway_id: String::new(),
+            mint_url: raw.mint_url.clone(),
             unit: raw.unit,
             metric,
             price_per_step: raw.price_per_step,
@@ -160,11 +161,8 @@ pub fn parse_advertisement(kind: u64, tags: &[Vec<String>]) -> Result<Advertisem
                 && o.step_size == candidate.step_size
                 && o.min_steps == candidate.min_steps
                 && o.gateway_id == candidate.gateway_id
+                && o.mint_url == candidate.mint_url
         });
-        // `raw.mint_url` is part of an offer's identity for the wallet, which is
-        // why an empty one is dropped above; the field lands on `Offer` with the
-        // wallet module rather than being carried unused here.
-        let _ = &raw.mint_url;
         if !duplicate {
             offers.push(candidate);
         }

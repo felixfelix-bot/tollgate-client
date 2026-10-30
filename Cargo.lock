@@ -3155,6 +3155,7 @@ dependencies = [
  "jni",
  "rusqlite",
  "tokio",
+ "url",
 ]
 
 [[package]]

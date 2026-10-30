@@ -34,7 +34,7 @@ fn race(settle: bool) {
             operation: format!("op-{i}"),
             network: "net".into(),
             vault: "vault".into(),
-            mint: "mint".into(),
+            mint: "https://mint.example".into(),
             unit: "sat".into(),
             day: 1,
             face: 1,

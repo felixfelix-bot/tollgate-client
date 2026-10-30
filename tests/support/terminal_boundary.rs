@@ -42,7 +42,7 @@ fn terminal_waiting_for_writer(settle: bool) {
         operation: "send".into(),
         network: "net".into(),
         vault: "vault".into(),
-        mint: "mint".into(),
+        mint: "https://mint.example".into(),
         unit: "sat".into(),
         day: 1,
         face: 8,

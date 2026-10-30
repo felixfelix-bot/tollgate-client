@@ -30,7 +30,7 @@ const SCHEMA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK
                 amount INTEGER NOT NULL CHECK(amount>0),
                 operation TEXT NOT NULL REFERENCES sends(operation),
                 PRIMARY KEY(mint,y));
-            PRAGMA user_version=2;";
+            PRAGMA user_version=3;";
 
 #[derive(Debug)]
 pub enum Error {
@@ -120,7 +120,7 @@ impl BudgetStore {
         let db = Self::connect(path.as_ref())?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-        if version != 2 || integrity != "ok" {
+        if version != 3 || integrity != "ok" {
             return Err(Error::Schema);
         }
         db.query_row("SELECT high_day FROM metadata WHERE singleton=1", [], |r| {
@@ -165,6 +165,17 @@ impl BudgetStore {
             EXISTS(SELECT 1 FROM proof_claims p WHERE p.operation=s.operation AND p.mint!=s.mint)", [], |r|r.get(0))?;
         if invalid_send != 0 {
             return Err(Error::Schema);
+        }
+        {
+            let mut stmt =
+                db.prepare("SELECT mint FROM sends UNION SELECT mint FROM proof_claims")?;
+            let mints = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            for mint in mints {
+                let mint = mint?;
+                if crate::mint_identity::canonical(&mint).ok().as_deref() != Some(mint.as_str()) {
+                    return Err(Error::Schema);
+                }
+            }
         }
         Ok(Self { db })
     }

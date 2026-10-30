@@ -85,6 +85,7 @@ impl BudgetStore {
         for s in [&p.operation, &p.network, &p.vault, &p.mint, &p.unit] {
             label(s)?;
         }
+        let mint = crate::mint_identity::canonical(&p.mint).map_err(|_| Error::Invalid)?;
         let mut proofs = p.proofs.clone();
         proofs.sort();
         if proofs.is_empty() {
@@ -134,20 +135,20 @@ impl BudgetStore {
         Self::reserve_on(&tx, &p.operation, &p.unit, day, face, fee, cap, total)?;
         if let Some(old) = old {
             let existing=tx.prepare("SELECT y,keyset,amount FROM proof_claims WHERE operation=?1 ORDER BY y,keyset,amount")?.query_map([&p.operation],|r|Ok(TrustedProofIdentity {y:r.get(0)?,keyset:r.get(1)?,amount:r.get(2)?}))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            if old != (p.network.clone(), p.vault.clone(), p.mint.clone()) || existing != proofs {
+            if old != (p.network.clone(), p.vault.clone(), mint.clone()) || existing != proofs {
                 return Err(Error::Conflict);
             }
             return status(&tx, &p.operation);
         }
         tx.execute(
             "INSERT INTO sends VALUES(?1,?2,?3,?4,'post_may_have_started',0,0)",
-            params![p.operation, p.network, p.vault, p.mint],
+            params![p.operation, p.network, p.vault, mint],
         )?;
         for proof in proofs {
             tx.execute(
                 "INSERT INTO proof_claims VALUES(?1,?2,?3,?4,?5)",
                 params![
-                    p.mint,
+                    mint,
                     proof.y,
                     proof.keyset,
                     number(proof.amount)?,

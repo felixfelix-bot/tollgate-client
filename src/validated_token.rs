@@ -30,6 +30,11 @@ impl TrustedMintSnapshot {
         unit: CurrencyUnit,
         keysets: Vec<KeySet>,
     ) -> Result<Self, ValidationError> {
+        let mint = MintUrl::from_str(
+            &crate::mint_identity::canonical(&mint.to_string())
+                .map_err(|_| ValidationError::Mint)?,
+        )
+        .map_err(|_| ValidationError::Mint)?;
         let mut ids = BTreeSet::new();
         if keysets.is_empty() {
             return Err(ValidationError::Metadata);
@@ -71,6 +76,11 @@ impl ValidatedToken {
         let text = std::str::from_utf8(bytes).map_err(|_| ValidationError::Encoding)?;
         let token = Token::from_str(text).map_err(|_| ValidationError::Encoding)?;
         let mint = token.mint_url().map_err(|_| ValidationError::Mint)?;
+        let mint = MintUrl::from_str(
+            &crate::mint_identity::canonical(&mint.to_string())
+                .map_err(|_| ValidationError::Mint)?,
+        )
+        .map_err(|_| ValidationError::Mint)?;
         if mint != snapshot.mint {
             return Err(ValidationError::Mint);
         }
@@ -271,6 +281,152 @@ mod tests {
         );
         assert!(vault.load(&reference).unwrap() == bytes.as_bytes());
         std::fs::remove_dir_all(path).unwrap();
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[test]
+    fn mint_alias_unmodified_plans_send_only_once() {
+        use crate::{
+            budget_store::BudgetStore, send_state::DeliveryObservation,
+            token_vault::ProtectedTokenVault,
+        };
+        let path = std::path::PathBuf::from(format!("/dev/shm/mint-alias-{}", std::process::id()));
+        let vault = ProtectedTokenVault::open(&path).unwrap();
+        let (s, sk) = fixture();
+        let alias = TrustedMintSnapshot::new(
+            MintUrl::from_str("https://MINT.example:443/").unwrap(),
+            s.unit.clone(),
+            s.keysets.clone(),
+        )
+        .unwrap();
+        let proof = proof(&s, &sk, "same-bearer", 2);
+        let a = parse(&token(&s, vec![proof.clone()]), &s).unwrap();
+        let b = parse(&token(&alias, vec![proof]), &alias).unwrap();
+        assert_eq!(a.proof_identities(), b.proof_identities());
+        let ctx = |id: &str| SendContext {
+            operation: id.into(),
+            network: "network".into(),
+            day: 1,
+            cap: 10,
+        };
+        let first = a
+            .store_send_plan(&vault, ctx("first"), FeeKnowledge::TrustedUpperBound(0))
+            .unwrap();
+        let second = b
+            .store_send_plan(&vault, ctx("second"), FeeKnowledge::TrustedUpperBound(0))
+            .unwrap();
+        let mut db = BudgetStore::create(path.join("ledger")).unwrap();
+        let mut sends = 0;
+        db.send_once(&first, "one", |_| {
+            sends += 1;
+            DeliveryObservation::Unknown
+        })
+        .unwrap();
+        let second_result = db.send_once(&second, "two", |_| {
+            sends += 1;
+            DeliveryObservation::Unknown
+        });
+        std::fs::remove_dir_all(path).unwrap();
+        assert_eq!(
+            sends, 1,
+            "two unmodified typed plans must not send the same bearer twice"
+        );
+        assert!(second_result.is_err());
+        assert!(a.overlaps(&b));
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[test]
+    fn mint_identity_matrix_typed_plans_and_restart() {
+        use crate::{
+            budget_store::BudgetStore, send_state::DeliveryObservation,
+            token_vault::ProtectedTokenVault,
+        };
+        let cases = [
+            ("https://MINT.example:443/", true),
+            ("HTTPS://mint.example/", true),
+            ("https://mint.example:444", false),
+            ("http://mint.example:80", false),
+            ("https://other.example", false),
+            ("https://mint.example/mint", false),
+            ("https://mint.example/Mint", false),
+        ];
+        for (i, (url, equivalent)) in cases.into_iter().enumerate() {
+            let path = std::path::PathBuf::from(format!(
+                "/dev/shm/mint-matrix-{}-{i}",
+                std::process::id()
+            ));
+            let vault = ProtectedTokenVault::open(&path).unwrap();
+            let (s, sk) = fixture();
+            let other = TrustedMintSnapshot::new(
+                MintUrl::from_str(url).unwrap(),
+                s.unit.clone(),
+                s.keysets.clone(),
+            )
+            .unwrap();
+            let p = proof(&s, &sk, "same", 1);
+            let a = parse(&token(&s, vec![p.clone()]), &s).unwrap();
+            // Construct token using original spelling, not normalized snapshot field.
+            let t = Token::new(
+                MintUrl::from_str(url).unwrap(),
+                vec![p],
+                None,
+                CurrencyUnit::Sat,
+            );
+            let b = parse(&t, &other).unwrap();
+            assert_eq!(parse(&t, &s).is_ok(), equivalent);
+            assert_eq!(a.overlaps(&b), equivalent);
+            let ctx = |id: &str| SendContext {
+                operation: id.into(),
+                network: "net".into(),
+                day: 1,
+                cap: 10,
+            };
+            let first = a
+                .store_send_plan(&vault, ctx("a"), FeeKnowledge::TrustedUpperBound(0))
+                .unwrap();
+            let second = b
+                .store_send_plan(&vault, ctx("b"), FeeKnowledge::TrustedUpperBound(0))
+                .unwrap();
+            let ledger = path.join("db");
+            let mut db = BudgetStore::create(&ledger).unwrap();
+            let mut calls = 0;
+            db.send_once(&first, "1", |_| {
+                calls += 1;
+                DeliveryObservation::Unknown
+            })
+            .unwrap();
+            drop(db);
+            let mut db = BudgetStore::open(&ledger).unwrap();
+            let result = db.send_once(&second, "2", |_| {
+                calls += 1;
+                DeliveryObservation::Unknown
+            });
+            assert_eq!(result.is_err(), equivalent, "{url}");
+            assert_eq!(calls, if equivalent { 1 } else { 2 });
+            drop(db);
+            // Old identity schemes must never be silently reopened, even with claims.
+            let old = rusqlite::Connection::open(&ledger).unwrap();
+            old.execute(
+                "UPDATE sends SET mint='https://mint.example:443' WHERE operation='a'",
+                [],
+            )
+            .unwrap();
+            old.execute(
+                "UPDATE proof_claims SET mint='https://mint.example:443' WHERE operation='a'",
+                [],
+            )
+            .unwrap();
+            assert!(matches!(
+                BudgetStore::open(&ledger),
+                Err(crate::budget_store::Error::Schema)
+            ));
+            old.pragma_update(None, "user_version", 2).unwrap();
+            drop(old);
+            assert!(matches!(
+                BudgetStore::open(&ledger),
+                Err(crate::budget_store::Error::Schema)
+            ));
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
     fn fixture() -> (TrustedMintSnapshot, SecretKey) {
         let sk = SecretKey::from_str(&"01".repeat(32)).unwrap();

@@ -1,5 +1,19 @@
 # Safety milestone report
 
+## Canonical mint identity repair (2026-10-30)
+
+- Shared real URL-parser policy fixes default-port alias ownership splits in
+  snapshot/token matching, overlap, typed plans and send-once persistence.
+- Schema 3 refuses all legacy schemas without migration; canonical stored mint
+  identities are audited on open. Existing exposure must not be discarded.
+- RED: exact two-unmodified-plans probe on 63a3982 invoked transport twice,
+  failing expected-one assertion. GREEN: `cargo test --locked --all-features`
+  passed 106 top-level tests (30 library); existing history_wiring unused imports
+  warning remains. See [identity contract](docs/mint-identity.md).
+- Mutable-plan/payload substitution and proof authenticity remain production
+  blockers/limits. No CLI/JNI enablement, funds, deployments or integration.
+
+
 ## Offline validated-token and protected-vault milestone (base 920a462)
 
 - Added `validated_token` (CDK feature) and Linux/Android `token_vault`; no CLI/JNI/watcher wiring.

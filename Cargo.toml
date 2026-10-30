@@ -12,6 +12,7 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+url = "2.5"
 # SQLite backends need a C compiler. Persistence is explicitly opt-in;
 # builds without it have no durable budget store.
 rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }

@@ -188,6 +188,63 @@ pub fn run_once(
     })
 }
 
+/// One gate, summarised as JSON for a UI. Kept here rather than in the Android
+/// crate so the phone and the CLI cannot disagree about what an offer costs.
+pub fn describe_gate(
+    gate_url: &str,
+    caps: &Caps,
+    histories: &HashMap<String, crate::scoring::GatewayHistory>,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    let (status, body) = http::request("GET", gate_url, None, timeout_ms)?;
+    if status != 200 {
+        return Err(format!("{gate_url} answered HTTP {status}"));
+    }
+    let kind = body
+        .split("\"kind\":")
+        .nth(1)
+        .and_then(|r| {
+            r.trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .ok()
+        })
+        .ok_or_else(|| "advert body has no numeric kind".to_string())?;
+    let mut advert = parse_advertisement(kind, &extract_tags(&body)).map_err(|e| e.to_string())?;
+    advert.stamp_gateway(gate_url);
+    let decision = decide(&advert.offers, histories, caps, None)?;
+
+    let offers: Vec<String> = advert
+        .offers
+        .iter()
+        .map(|o| {
+            let h = histories.get(&o.gateway_id);
+            format!(
+                r#"{{"unit":"{}","price_per_step":{},"steps":{},"cost":{:.3},"cost_per_minute":{},"quality":{:.3},"p":{:.3}}}"#,
+                o.unit,
+                o.price_per_step,
+                o.steps_to_buy(),
+                o.total_cost(),
+                o.cost_per_minute().map(|c| format!("{c:.3}")).unwrap_or("null".into()),
+                h.map(|x| x.quality()).unwrap_or(0.5),
+                h.map(|x| x.success_probability()).unwrap_or(0.5),
+            )
+        })
+        .collect();
+    // The decision is a Rust enum, not a JSON type: render it as a *string* so the
+    // whole document still parses. A UI that receives invalid JSON is a bug that
+    // hides until someone points a parser at it.
+    let decision = format!("{decision:?}").replace('\\', "\\\\").replace('"', "\\\"");
+    Ok(format!(
+        r#"{{"gate":"{}","offers":[{}],"decision":"{}"}}"#,
+        gate_url,
+        offers.join(","),
+        decision
+    ))
+}
+
 /// Probe, decide, buy — and write down what happened.
 ///
 /// The scores are only as good as the events behind them, so every run records a

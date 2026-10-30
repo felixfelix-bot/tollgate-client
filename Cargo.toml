@@ -8,6 +8,8 @@ description = "TollGate v1 client core: discovery, Cashu purchase, reliability/p
 [lib]
 name = "tollgate_client_core"
 path = "src/lib.rs"
+# cdylib for the Android shell (.so loaded by the JVM); rlib for everyone else.
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 # The cdk wallet is the only part of the core that needs a C compiler (rusqlite
@@ -17,7 +19,12 @@ path = "src/lib.rs"
 cdk = { version = "0.18.3", optional = true }
 cdk-sqlite = { version = "0.18.3", optional = true }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time"], optional = true }
+# Only for the Android shell: the JNI shim is a marshalling layer, not logic.
+jni = { version = "0.21.1", optional = true }
 
 [features]
 default = ["cdk"]
 cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio"]
+# The JNI shim the Android shell loads. Deliberately independent of `cdk`: the
+# phone can buy over the Lightning lane with no wallet on the device.
+android = ["dep:jni"]

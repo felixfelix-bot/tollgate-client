@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use crate::json::{field_bool, field_f64, field_str, field_u64};
+use crate::json::{field_f64, field_str};
 use crate::scoring::GatewayHistory;
 
 #[derive(Debug, Clone, PartialEq)]

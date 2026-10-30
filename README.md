@@ -150,6 +150,37 @@ RESULT state=not-attempted
 P(success)` divides by. A truncated last line is skipped and counted, never
 fatal: a power cut costs one sample.
 
+## The Android shell
+
+A real, signed APK built with aapt2 + javac + d8 — no Gradle, because Gradle+AGP
+is a 1 GB download with its own JDK opinions and this app is one activity and one
+native library:
+
+```bash
+ANDROID_SDK_ROOT=~/android-sdk ./packaging/android/build-apk.sh
+# -> tollgate-android.apk  (521 KB, arm64-v8a + x86_64, signed)
+```
+
+What it does: reads the *default route* from `LinkProperties` (the same rule as
+`--auto`), builds `http://<gateway>:2121/`, and calls into Rust through two JNI
+entry points that take and return JSON. The core does the probing, parsing,
+pricing and ranking; the phone only renders.
+
+Verified without a device, because a JNI symbol that never resolves is a runtime
+`UnsatisfiedLinkError` and nothing else:
+
+```
+$ java -Djava.library.path=target/release -cp … dev.tollgate.client.Probe http://127.0.0.1:18212/
+caps={"caps":{"unit":"sat","max_cost_per_minute":2.500,…},"version":"0.1.0"}
+describe={"gate":"http://127.0.0.1:18212/","offers":[{"unit":"sat","price_per_step":2,
+          "steps":1,"cost":2.000,"cost_per_minute":2.000,"quality":0.500,"p":0.500}],
+          "decision":"Buy { gateway_id: …, steps: 1, cost: 2.0, unit: \"sat\" }"}
+```
+
+Not done yet on this platform: no auto-buy, no `WifiNetworkSuggestion` (Android 10+
+forbids an ordinary app from joining a network silently), no background service.
+The UI says what it measured and nothing more.
+
 ## Portability
 
 The cdk wallet is a cargo feature (`default = ["cdk"]`). Without it the whole

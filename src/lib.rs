@@ -12,6 +12,8 @@ pub mod agent;
 pub mod cdk_wallet;
 pub mod discovery;
 pub mod history;
+#[cfg(feature = "android")]
+pub mod jni;
 pub mod http;
 pub mod json;
 pub mod lightning;

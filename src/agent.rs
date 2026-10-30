@@ -20,6 +20,16 @@ pub trait Wallet {
     fn is_spent(&mut self, token: &str) -> Result<bool, String>;
 }
 
+/// So a runtime-chosen funding source can live in a `Box<dyn Wallet>`.
+impl<T: Wallet + ?Sized> Wallet for Box<T> {
+    fn mint_token(&mut self, mint_url: &str, unit: &str, amount: u64) -> Result<String, String> {
+        (**self).mint_token(mint_url, unit, amount)
+    }
+    fn is_spent(&mut self, token: &str) -> Result<bool, String> {
+        (**self).is_spent(token)
+    }
+}
+
 pub trait GateTransport {
     /// `POST /` with the raw token. `Err` means "no answer" (timeout, reset),
     /// which is ambiguous, not a refusal.

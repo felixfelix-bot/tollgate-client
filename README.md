@@ -83,6 +83,28 @@ changes.
 A `503` with `code: access-grant-failed` is *paid-but-not-open*, which the client
 keeps polling and never treats as a failed payment — that distinction is a test.
 
+## The cdk wallet (token lane)
+
+```bash
+head -c 64 /dev/urandom > ~/.tollgate/seed.bin && chmod 600 ~/.tollgate/seed.bin
+tollgate-agent --gate http://192.168.50.205:2121 --wallet cdk \
+               --seed-file ~/.tollgate/seed.bin --wallet-db ~/.tollgate \
+               --journal ~/.tollgate/journal.txt --attempt-id "$(date +%s)"
+```
+
+`CdkFunding` plugs `cashubtc/cdk` (0.18.3) into the same `Wallet` seam the
+pre-funded file wallet uses: NUT-04 quote → pay the BOLT11 through a
+`LightningPayer` → mint proofs → token; NUT-07 for "did that ambiguous purchase
+take my money?". One SQLite file per (mint, unit) — the pair *is* the wallet's
+identity.
+
+Verified so far: it opens the wallet, prices the offer, and **reaches the mint**
+(`mint quote: Http transport error … Name or service not known` against a fake
+mint). Completing a mint needs a live mint, which is the next step.
+
+The seed file is read only when `mode == 0600`; anything else is refused before
+any money moves.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

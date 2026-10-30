@@ -13,6 +13,8 @@ use std::process::ExitCode;
 use tollgate_client_core::policy::Caps;
 use tollgate_client_core::purchase::IntentState;
 use tollgate_client_core::lightning::LightningPayer;
+use tollgate_client_core::agent::Wallet;
+use tollgate_client_core::cdk_wallet::CdkFunding;
 use tollgate_client_core::runner::{run_lightning, run_once, FileJournal, FileWallet};
 
 /// Prints the invoice for a human to pay with any wallet, then lets the poll
@@ -33,6 +35,24 @@ fn arg(args: &[String], name: &str) -> Option<String> {
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
         .cloned()
+}
+
+/// A wallet seed is the wallet. Anything but `0600` is refused rather than
+/// silently accepted, because the failure mode is theft, not breakage.
+fn load_seed(path: &str) -> Result<[u8; 64], String> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::metadata(path).map_err(|e| format!("cannot stat seed file {path}: {e}"))?;
+    let mode = meta.permissions().mode() & 0o777;
+    if mode != 0o600 {
+        return Err(format!("seed file {path} is mode {mode:o}; refusing anything but 0600"));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read seed file {path}: {e}"))?;
+    if bytes.len() != 64 {
+        return Err(format!("seed file {path} is {} bytes; expected 64", bytes.len()));
+    }
+    let mut seed = [0u8; 64];
+    seed.copy_from_slice(&bytes);
+    Ok(seed)
 }
 
 fn lightning_main(args: &[String], gate: &str) -> ExitCode {
@@ -106,23 +126,44 @@ fn main() -> ExitCode {
         return lightning_main(&args, &gate);
     }
 
-    let (Some(token_file), Some(journal), Some(attempt_id)) = (
-        arg(&args, "--token-file"),
-        arg(&args, "--journal"),
-        arg(&args, "--attempt-id"),
-    ) else {
+    let (Some(journal), Some(attempt_id)) = (arg(&args, "--journal"), arg(&args, "--attempt-id")) else {
         eprintln!("missing required flag (--token-file, --journal, --attempt-id); --help for usage");
         return ExitCode::from(64);
     };
+    let token_file = arg(&args, "--token-file").unwrap_or_default();
+    if arg(&args, "--wallet").as_deref() != Some("cdk") && token_file.is_empty() {
+        eprintln!("missing --token-file (or use --wallet cdk); --help for usage");
+        return ExitCode::from(64);
+    }
 
-    let token = match std::fs::read_to_string(&token_file) {
-        Ok(t) => t.trim().to_string(),
-        Err(e) => {
-            eprintln!("cannot read token file {token_file}: {e}");
-            return ExitCode::FAILURE;
+    // Two funding sources behind one seam: a pre-funded note, or cdk minting on
+    // demand (which pays the mint's BOLT11 through the payer before it returns).
+    let mut wallet: Box<dyn Wallet> = if arg(&args, "--wallet").as_deref() == Some("cdk") {
+        let Some(seed_file) = arg(&args, "--seed-file") else {
+            eprintln!("--wallet cdk needs --seed-file (64 raw bytes, mode 0600)");
+            return ExitCode::from(64);
+        };
+        let Some(db_dir) = arg(&args, "--wallet-db") else {
+            eprintln!("--wallet cdk needs --wallet-db (a directory, 0700)");
+            return ExitCode::from(64);
+        };
+        match load_seed(&seed_file) {
+            Ok(seed) => Box::new(CdkFunding::new(seed, db_dir, Box::new(ManualPayer))),
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(78);
+            }
         }
+    } else {
+        let token = match std::fs::read_to_string(&token_file) {
+            Ok(t) => t.trim().to_string(),
+            Err(e) => {
+                eprintln!("cannot read token file {token_file}: {e}");
+                return ExitCode::from(66);
+            }
+        };
+        Box::new(FileWallet { token })
     };
-    let mut wallet = FileWallet { token };
     let mut journal = match FileJournal::open(&journal) {
         Ok(j) => j,
         Err(e) => {

@@ -264,3 +264,138 @@ fn kill_after_send_mark_before_record() {
     assert_eq!(r["usage"], 3);
     assert_eq!(f.records(), 0);
 }
+
+#[test]
+fn duplicate_and_unknown_policy_fields_fail_before_enrollment() {
+    for replacement in [
+        r#""caps":{"sat":1,"sat":10}"#,
+        r#""fee":0,"fee":1"#,
+        r#""extra":1,"fee":1"#,
+        r#""fee":1.0"#,
+        r#""fee":9223372036854775808"#,
+    ] {
+        let f = Fixture::new(10);
+        let raw = serde_json::to_string(&f.policy).unwrap();
+        let raw = if replacement.starts_with("\"caps") {
+            raw.replace(r#""caps":{"sat":10}"#, replacement)
+        } else {
+            raw.replace(r#""fee":1"#, replacement)
+        };
+        std::fs::write(f.root.join("expected.json"), raw).unwrap();
+        let o = f.run(&[
+            "--recording-only",
+            "enroll",
+            "--simulation-state",
+            "simulation",
+            "--simulation-policy",
+            "expected.json",
+        ]);
+        assert!(!o.status.success(), "accepted {replacement}");
+    }
+}
+#[test]
+fn swapped_ledger_or_policy_and_partial_enrollment_fail_closed() {
+    for component in ["ledger", "ledger.policy.json"] {
+        let a = Fixture::new(10);
+        let b = Fixture::new(10);
+        a.enroll();
+        b.enroll();
+        let token = a.token("swap", 2, false);
+        std::fs::copy(
+            b.root.join("simulation").join(component),
+            a.root.join("simulation").join(component),
+        )
+        .unwrap();
+        assert!(
+            !a.attempt(&token, "swap").status.success(),
+            "accepted swapped {component}"
+        );
+        assert_eq!(a.records(), 0);
+    }
+    let f = Fixture::new(10);
+    f.enroll();
+    let token = f.token("partial", 2, false);
+    let db = rusqlite::Connection::open(f.root.join("simulation/ledger")).unwrap();
+    // A schema-complete ledger whose enrollment transaction never committed.
+    db.execute(
+        "UPDATE metadata SET policy_identity=NULL, policy_json=NULL, installation_path=NULL",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    assert!(!f.attempt(&token, "partial").status.success());
+    assert!(!f
+        .run(&[
+            "--recording-only",
+            "enroll",
+            "--simulation-state",
+            "simulation",
+            "--simulation-policy",
+            "expected.json"
+        ])
+        .status
+        .success());
+    assert_eq!(f.records(), 0);
+}
+
+#[test]
+fn copied_pair_and_changed_matching_policy_are_not_new_authority() {
+    let a = Fixture::new(10);
+    let b = Fixture::new(10);
+    a.enroll();
+    b.enroll();
+    let token = a.token("pair", 2, false);
+    for component in ["ledger", "ledger.policy.json"] {
+        std::fs::copy(
+            b.root.join("simulation").join(component),
+            a.root.join("simulation").join(component),
+        )
+        .unwrap();
+    }
+    assert!(!a.attempt(&token, "pair").status.success());
+    let mut f = Fixture::new(10);
+    f.enroll();
+    let token = f.token("change", 2, false);
+    f.policy.caps.insert("sat".into(), 100);
+    f.write_policy();
+    let path = f.root.join("simulation/ledger.policy.json");
+    let mut bound: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    bound["policy"] = serde_json::to_value(&f.policy).unwrap();
+    std::fs::write(path, serde_json::to_vec(&bound).unwrap()).unwrap();
+    assert!(!f.attempt(&token, "change").status.success());
+    assert_eq!(f.records(), 0);
+}
+#[test]
+fn dry_run_and_existing_real_directory_cannot_enroll() {
+    let f = Fixture::new(10);
+    std::fs::create_dir(f.root.join("real-state")).unwrap();
+    std::fs::write(f.root.join("real-state/wallet"), b"sentinel").unwrap();
+    for args in [
+        vec![
+            "--recording-only",
+            "enroll",
+            "--simulation-state",
+            "real-state",
+            "--simulation-policy",
+            "expected.json",
+        ],
+        vec![
+            "--recording-only",
+            "enroll",
+            "--simulation-state",
+            "simulation",
+            "--simulation-policy",
+            "expected.json",
+            "--dry-run",
+        ],
+    ] {
+        assert!(!f.run(&args).status.success());
+    }
+    assert_eq!(
+        std::fs::read(f.root.join("real-state/wallet")).unwrap(),
+        b"sentinel"
+    );
+    assert!(!f.root.join("real-state/ledger").exists());
+    assert!(!f.root.join("simulation").exists());
+}

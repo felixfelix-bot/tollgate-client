@@ -1,3 +1,13 @@
+## Policy/ledger binding hardening
+
+- Strict duplicate rejection now includes nested cap-map keys (top-level duplicate and unknown fields already use serde strict structs). Caps/fees are integer u64 values bounded by SQLite i64, never floating-point budgets.
+- Schema v4 stores canonical enrolled policy, random installation identity and canonical ledger location together in one SQLite transaction. A strict private sidecar carries the matching identity/policy; it is synced before commit. Missing/partial enrollment, swapping either component, copied unrelated pairs, and editing both expected/sidecar policy fail closed. No repair, reset, relocation or migration command is provided; v3 state is rejected, not discarded.
+- RED actual CLI tests reproduced duplicate sat-key acceptance and swapped-ledger acceptance; GREEN full all-features suite includes eight CLI subprocess tests (including restart, partial enrollment and SIGKILL send boundary). No-default-features suite also passed.
+- Direct LLVM coverage using the five-test subprocess subset: offline_policy 195/205 lines (95.12%), 311/364 regions (85.44%); not full-suite or branch coverage. cargo-llvm-cov is unavailable; matching rustup LLVM tools used.
+- Recording enrollment requires a new simulation directory, rejects --dry-run/legacy options, and never adopts an existing wallet directory. The standalone simulator remains explicitly offline. No real transport, money, deployment or auto-buy enablement occurred.
+- Remaining gate: ledger symlink/TOCTOU hardening (including SQLite sidecars) is NOT solved. Trusted local storage/clock and no hostile same-UID mutation or rollback remain assumptions; this binding is not tamper-proof. After that gate, integrate the pre-funded wallet -> durable reservation -> exact-byte bound-interface send -> session observation/reconciliation vertical path, not another disconnected simulation.
+- Evidence: ~/reports/reviews/policy-binding-{red,green,full,minimal}.log. Static independent review found no blocker within the declared exclusions.
+
 # Offline policy simulation
 
 Build: `cargo build --features persistence --bin offline-policy-sim`.

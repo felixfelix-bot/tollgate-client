@@ -24,6 +24,7 @@ use std::{
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Enrollment {
+    #[serde(deserialize_with = "unique_caps")]
     pub caps: BTreeMap<String, u64>,
     pub fee: u64,
     pub snapshot_sha256: String,
@@ -31,10 +32,41 @@ pub struct Enrollment {
     pub valid_until: u64,
 }
 
+fn unique_caps<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, u64>, D::Error> {
+    struct Unique;
+    impl<'de> serde::de::Visitor<'de> for Unique {
+        type Value = BTreeMap<String, u64>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("unique integer caps")
+        }
+        fn visit_map<M: serde::de::MapAccess<'de>>(
+            self,
+            mut m: M,
+        ) -> Result<Self::Value, M::Error> {
+            let mut caps = BTreeMap::new();
+            while let Some((k, v)) = m.next_entry::<String, u64>()? {
+                if caps.insert(k, v).is_some() {
+                    return Err(serde::de::Error::custom("duplicate cap key"));
+                }
+            }
+            Ok(caps)
+        }
+    }
+    d.deserialize_map(Unique)
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct BoundPolicy {
+    identity: String,
+    policy: Enrollment,
+}
+
 pub struct PolicyAdapter {
     ledger: BudgetStore,
     policy: Enrollment,
     path: PathBuf,
+    identity: String,
 }
 fn policy_path(db: &Path) -> PathBuf {
     let mut name = db.as_os_str().to_os_string();
@@ -72,7 +104,7 @@ fn private_parent(path: &Path) -> Result<File, String> {
     ProtectedTokenVault::open(parent).map_err(|_| "unsafe policy directory")?;
     File::open(parent).map_err(|_| "policy directory unavailable".into())
 }
-fn load_policy(path: &Path) -> Result<Enrollment, String> {
+fn load_policy(path: &Path) -> Result<BoundPolicy, String> {
     let parent = private_parent(path)?;
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     let nofollow = 0o100000;
@@ -99,8 +131,8 @@ fn load_policy(path: &Path) -> Result<Enrollment, String> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|_| "policy read failed")?;
-    let policy = serde_json::from_slice(&bytes).map_err(|_| "invalid policy file")?;
-    validate(&policy)?;
+    let policy: BoundPolicy = serde_json::from_slice(&bytes).map_err(|_| "invalid policy file")?;
+    validate(&policy.policy)?;
     Ok(policy)
 }
 impl PolicyAdapter {
@@ -114,34 +146,66 @@ impl PolicyAdapter {
         if std::fs::symlink_metadata(&path).is_ok() {
             return Err("already enrolled".into());
         }
-        let ledger = BudgetStore::create(db_path).map_err(|_| "ledger enrollment failed")?;
+        let mut ledger = BudgetStore::create(db_path).map_err(|_| "ledger enrollment failed")?;
+        let location =
+            std::fs::canonicalize(db_path).map_err(|_| "installation path unavailable")?;
+        let location = location.to_str().ok_or("non UTF-8 installation path")?;
+        let tx = ledger
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|_| "enrollment transaction failed")?;
+        let identity: String = tx
+            .query_row("SELECT lower(hex(randomblob(32)))", [], |r| r.get(0))
+            .map_err(|_| "identity generation failed")?;
+        let encoded = serde_json::to_string(policy).map_err(|_| "policy encoding failed")?;
+        tx.execute("UPDATE metadata SET policy_identity=?1, policy_json=?2, installation_path=?3 WHERE singleton=1 AND policy_identity IS NULL",
+            rusqlite::params![identity, encoded, location]).map_err(|_| "binding failed")?;
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(&path)
             .map_err(|_| "policy enrollment failed")?;
-        let bytes = serde_json::to_vec(policy).map_err(|_| "policy encoding failed")?;
+        let bytes = serde_json::to_vec(&BoundPolicy {
+            identity: identity.clone(),
+            policy: policy.clone(),
+        })
+        .map_err(|_| "policy encoding failed")?;
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
             .map_err(|_| "policy persistence failed")?;
         parent
             .sync_all()
             .map_err(|_| "policy directory sync failed")?;
+        tx.commit().map_err(|_| "binding commit failed")?;
         Ok(Self {
             ledger,
             policy: policy.clone(),
             path,
+            identity,
         })
     }
     pub fn open(db_path: &Path) -> Result<Self, String> {
         let path = policy_path(db_path);
-        let policy = load_policy(&path)?;
+        let bound = load_policy(&path)?;
         let ledger = BudgetStore::open(db_path).map_err(|_| "ledger open failed")?;
+        let stored: (String, String, String) = ledger.db.query_row(
+            "SELECT policy_identity, policy_json, installation_path FROM metadata WHERE singleton=1", [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(|_| "incomplete enrollment")?;
+        let location =
+            std::fs::canonicalize(db_path).map_err(|_| "installation path unavailable")?;
+        if stored.0 != bound.identity
+            || stored.1
+                != serde_json::to_string(&bound.policy).map_err(|_| "policy encoding failed")?
+            || Some(stored.2.as_str()) != location.to_str()
+        {
+            return Err("policy/ledger binding mismatch".into());
+        }
         Ok(Self {
             ledger,
-            policy,
+            policy: bound.policy,
             path,
+            identity: bound.identity,
         })
     }
     #[allow(clippy::too_many_arguments)]
@@ -156,7 +220,11 @@ impl PolicyAdapter {
         now: u64,
         transport: &mut impl VerifiedBytesTransport,
     ) -> Result<u64, String> {
-        if expected != &self.policy || load_policy(&self.path)? != self.policy {
+        let bound = load_policy(&self.path)?;
+        if expected != &self.policy
+            || bound.policy != self.policy
+            || bound.identity != self.identity
+        {
             return Err("enrollment mismatch".into());
         }
         if now < self.policy.valid_from || now >= self.policy.valid_until {

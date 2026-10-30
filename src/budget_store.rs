@@ -7,8 +7,8 @@ use std::{
     time::Duration,
 };
 
-const SCHEMA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), high_day INTEGER NOT NULL CHECK(high_day>=0));
-            INSERT INTO metadata VALUES(1,0);
+const SCHEMA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), high_day INTEGER NOT NULL CHECK(high_day>=0), policy_identity TEXT, policy_json TEXT, installation_path TEXT);
+            INSERT INTO metadata(singleton,high_day) VALUES(1,0);
             CREATE TABLE reservations (
                 id TEXT PRIMARY KEY NOT NULL, unit TEXT NOT NULL, day INTEGER NOT NULL CHECK(day>=0),
                 face INTEGER NOT NULL CHECK(face>0), fee INTEGER NOT NULL CHECK(fee>=0), cap INTEGER NOT NULL CHECK(cap>=0),
@@ -30,7 +30,7 @@ const SCHEMA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK
                 amount INTEGER NOT NULL CHECK(amount>0),
                 operation TEXT NOT NULL REFERENCES sends(operation),
                 PRIMARY KEY(mint,y));
-            PRAGMA user_version=3;";
+            PRAGMA user_version=4;";
 
 #[derive(Debug)]
 pub enum Error {
@@ -120,7 +120,7 @@ impl BudgetStore {
         let db = Self::connect(path.as_ref())?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-        if version != 3 || integrity != "ok" {
+        if version != 4 || integrity != "ok" {
             return Err(Error::Schema);
         }
         db.query_row("SELECT high_day FROM metadata WHERE singleton=1", [], |r| {

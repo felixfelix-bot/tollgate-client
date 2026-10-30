@@ -1,3 +1,12 @@
+# Offline policy adapter — simulation only
+
+- Added immutable enrolled per-unit caps, fee bound, snapshot digest and freshness interval.
+- CLI uses exact-byte validated send with a fake digest-only callback; no network payment path.
+- Six subprocess tests passed: restart exposure, full face plus fee, changed policy, aliases/overlap, vault corruption, snapshot freshness/hash and unknown unit.
+- RED: executable absent caused six failures; raw-API compile-negative fence failed when method was public. GREEN: cargo test --features persistence and cargo test --features nonproduction-test-harness passed.
+- Raw API requires explicit nonproduction-test-harness feature (or unit tests); production doctest proves it unavailable. Existing legacy tests retained behind that feature.
+- No production enablement: enrollment does not authenticate metadata; remote provenance, authenticated clock, spendability, interface binding and verified access remain gates.
+
 # Progress
 
 ## Offline verified-byte boundary (2026-10-30)

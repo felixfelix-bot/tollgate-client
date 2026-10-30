@@ -21,6 +21,12 @@ pub mod json;
 pub mod lightning;
 mod mint_identity;
 pub mod netcfg;
+#[cfg(all(
+    feature = "cdk",
+    feature = "persistence",
+    any(target_os = "linux", target_os = "android")
+))]
+pub mod offline_policy;
 pub mod policy;
 pub mod purchase;
 pub mod runner;

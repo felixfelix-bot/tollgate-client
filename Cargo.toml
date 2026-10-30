@@ -11,8 +11,15 @@ path = "src/lib.rs"
 # cdylib for the Android shell (.so loaded by the JVM); rlib for everyone else.
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "offline-policy-sim"
+path = "src/bin/offline-policy-sim.rs"
+required-features = ["cdk", "persistence"]
+
 [dependencies]
 url = "2.5"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 # SQLite backends need a C compiler. Persistence is explicitly opt-in;
 # builds without it have no durable budget store.
 rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
@@ -25,7 +32,9 @@ jni = { version = "0.21.1", optional = true }
 [features]
 default = ["cdk"]
 persistence = ["dep:rusqlite"]
-cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio"]
+# Deliberate legacy test harness; never enable for production.
+nonproduction-test-harness = ["persistence"]
+cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio", "dep:serde", "dep:serde_json"]
 # The JNI shim the Android shell loads. Deliberately independent of `cdk`: the
 # phone can buy over the Lightning lane with no wallet on the device.
 android = ["dep:jni"]

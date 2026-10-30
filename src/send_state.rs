@@ -69,12 +69,25 @@ fn status(db: &Connection, id: &str) -> Result<SendStatus> {
         internet_verified: false,
     })
 }
+/// Production builds must not expose the raw legacy callback API.
+#[cfg_attr(
+    not(feature = "nonproduction-test-harness"),
+    doc = r#"
+```compile_fail,E0599
+use tollgate_client_core::{budget_store::BudgetStore, send_state::{TrustedSendPlan, DeliveryObservation}};
+fn bypass(db: &mut BudgetStore, plan: &TrustedSendPlan) {
+    db.send_once_nonproduction(plan, "attempt", |_| DeliveryObservation::Unknown);
+}
+```
+"#
+)]
 impl BudgetStore {
     /// NON-PRODUCTION legacy harness: trusts mutable claims and arbitrary payloads.
     /// Never use for payment. Use `send_validated` for the offline verified-byte seam.
     /// Only the transaction that INSERTs the irreversible send mark calls transport.
     /// Exact replay is status-only, regardless of attempt ID. No retry capability
     /// escapes this call. Panic/death/error after commit permanently quarantines it.
+    #[cfg(any(test, feature = "nonproduction-test-harness"))]
     pub fn send_once_nonproduction<F>(
         &mut self,
         p: &TrustedSendPlan,

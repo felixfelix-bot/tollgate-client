@@ -1,4 +1,4 @@
-#![cfg(feature = "persistence")]
+#![cfg(all(feature = "persistence", feature = "nonproduction-test-harness"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tollgate_client_core::budget_store::BudgetStore;
 use tollgate_client_core::send_state::*;

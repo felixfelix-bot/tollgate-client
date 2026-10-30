@@ -1,4 +1,4 @@
-#![cfg(feature = "persistence")]
+#![cfg(all(feature = "persistence", feature = "nonproduction-test-harness"))]
 use std::sync::{Arc, Barrier};
 use tollgate_client_core::{budget_store::BudgetStore, send_state::*};
 

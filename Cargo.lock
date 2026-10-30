@@ -3154,6 +3154,8 @@ dependencies = [
  "cdk-sqlite",
  "jni",
  "rusqlite",
+ "serde",
+ "serde_json",
  "tokio",
  "url",
 ]

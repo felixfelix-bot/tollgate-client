@@ -2,9 +2,8 @@
 
 TollGate **v1** client core, shared by two shells:
 
-- **Android** — Kotlin/Jetpack Compose + foreground service, Wi-Fi via
-  `WifiNetworkSuggestion` (stock Android cannot silently auto-join; the OS
-  mediates, the app buys the moment it is joined).
+- **Android** — Java activity + discovery-only foreground service. Automatic
+  spending is disabled; `WifiNetworkSuggestion` is not implemented.
 - **Debian** — `tollgate-agent` daemon + `tollgate-ctl` (CLI/TUI) + a
   NetworkManager dispatcher, which *can* join and switch fully automatically.
 
@@ -177,9 +176,13 @@ describe={"gate":"http://127.0.0.1:18212/","offers":[{"unit":"sat","price_per_st
           "decision":"Buy { gateway_id: …, steps: 1, cost: 2.0, unit: \"sat\" }"}
 ```
 
-Not done yet on this platform: no auto-buy, no `WifiNetworkSuggestion` (Android 10+
-forbids an ordinary app from joining a network silently), no background service.
-The UI says what it measured and nothing more.
+The foreground service polls discovery every 60 seconds, but **does not spend**,
+even if a note was saved by an older build. Android 14 dataSync permission is
+required; a refused foreground start stops the service without starting a worker.
+There is no automatic-spend opt-in in this build: persistent budget accounting,
+stable token intent IDs and ambiguity reconciliation are not implemented. JNI
+`Core.buy` remains an experimental API, not a production payment path.
+No `WifiNetworkSuggestion` is implemented. See [verification and limitations](docs/android-verification.md).
 
 ## Portability
 
@@ -208,5 +211,7 @@ reconciliation for ambiguous attempts — after the recon verdict from
 ## Test
 
 ```bash
-cargo test          # 8 tests: math, ranking, reliability, caps, hysteresis, min_steps
+cargo test
+cargo test --no-default-features --features android
+python3 tests/android_service_test.py  # requires javac/java on PATH
 ```

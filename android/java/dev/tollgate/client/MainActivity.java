@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
         });
 
         final android.widget.EditText token = new android.widget.EditText(this);
-        token.setHint("paste a Cashu note (cashuB…) to fund auto-buy");
+        token.setHint("automatic spending disabled — do not store real funds");
         token.setText(prefs().getString("token", ""));
 
         Button save = new Button(this);
@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 prefs().edit().putString("token", token.getText().toString().trim()).apply();
-                out.setText("note saved — the background service will spend it");
+                out.setText("note saved locally — automatic spending is disabled");
             }
         });
 
@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 startForegroundService(new Intent(MainActivity.this, TollgateService.class));
-                out.setText("watching in the background (60 s)");
+                out.setText("discovery-only watch requested (60 s); automatic spending disabled");
             }
         });
 

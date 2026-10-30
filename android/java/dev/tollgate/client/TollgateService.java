@@ -7,7 +7,6 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -17,12 +16,9 @@ import android.os.IBinder;
 import java.net.InetAddress;
 
 /**
- * Watches the gateway we are routed through and buys when it is selling.
- *
- * A foreground service, because this is exactly the case Android would otherwise
- * kill: the interesting moment is when the screen is off and the phone has just
- * joined a network. The notification is not decoration — it is the price and the
- * decision, and it disappears when there is nothing to sell.
+ * Discovery-only foreground watcher. Never spends a stored token.
+ * Automatic payment is disabled until durable budgets and ambiguous-token
+ * reconciliation are implemented; see docs/android-verification.md.
  */
 public class TollgateService extends Service {
     static final String CHANNEL = "tollgate";
@@ -30,6 +26,7 @@ public class TollgateService extends Service {
     private static final long INTERVAL_MS = 60_000;
 
     private volatile boolean running = true;
+    private boolean foreground = false;
     private Thread worker;
 
     @Override
@@ -38,11 +35,25 @@ public class TollgateService extends Service {
         NotificationChannel ch = new NotificationChannel(
                 CHANNEL, "TollGate", NotificationManager.IMPORTANCE_LOW);
         ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
-        startForeground(NOTIFICATION_ID, notification("watching the gateway", "no TollGate found yet"));
+        // A refused foreground start must never degrade to background work.
+        try {
+            startForeground(NOTIFICATION_ID, notification("watching the gateway", "no TollGate found yet"));
+            foreground = true;
+        } catch (RuntimeException e) {
+            foreground = false;
+            running = false;
+            android.util.Log.w("TollgateService", "foreground start refused", e);
+            stopSelf();
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // onStartCommand can still arrive after stopSelf() in onCreate().
+        if (!foreground || !running) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (worker == null) {
             worker = new Thread(new Runnable() {
                 @Override
@@ -50,7 +61,7 @@ public class TollgateService extends Service {
                     while (running) {
                         try {
                             tick();
-                        } catch (Throwable t) {
+                        } catch (RuntimeException t) {
                             post("error", String.valueOf(t));
                         }
                         try {
@@ -106,24 +117,10 @@ public class TollgateService extends Service {
             return;
         }
 
-        SharedPreferences prefs = getSharedPreferences("tollgate", MODE_PRIVATE);
-        String token = prefs.getString("token", "");
-        boolean withinCap = described.contains("\"decision\":\"Buy");
-
-        if (!token.isEmpty() && withinCap) {
-            // Auto-buy: the note is the payment; there is nothing to confirm.
-            String journal = getFilesDir().getAbsolutePath() + "/journal.txt";
-            String attempt = "svc-" + (System.currentTimeMillis() / 60000);
-            String bought = Core.buy(url, token, attempt, journal);
-            if (bought.contains("\"state\":\"granted\"")) {
-                prefs.edit().putString("token", "").apply(); // a note is single-use
-                post("bought access at " + gw, bought);
-                return;
-            }
-            post("could not buy at " + gw, bought);
-            return;
-        }
-        post("TollGate at " + gw, withinCap ? described : "above your cap: " + described);
+        // Do not read the saved bearer token or call Core.buy here. A new
+        // attempt ID on each tick bypassed journal deduplication after an
+        // ambiguous outcome; JNI also resets spent_today on every invocation.
+        post("TollGate at " + gw, "discovery only — automatic spending disabled: " + described);
     }
 
     private Notification notification(String title, String body) {

@@ -17,6 +17,9 @@
          survive the app leaving the foreground. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- targetSdk 34 requires the FGS *type* permission alongside the generic one;
+         without it startForeground() throws SecurityException at onCreate. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:label="TollGate"

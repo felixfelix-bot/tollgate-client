@@ -1,5 +1,13 @@
 # Progress
 
+## Send/terminal TOCTOU correction
+
+- Ownership check now runs under the same BEGIN IMMEDIATE as release/settle replay and insertion.
+- Four behavioral regressions observed failing on 03bbbfed: two deterministic lock-boundary tests and two 2,000-send public API races.
+- Fixed: zero bypasses, all exposure retained across day rollover/reopen, replay never calls transport.
+- Persistence/all-features: 88 top-level tests each; default/minimal: 61 each; targeted crash: 7; Android host: 2. All passed.
+- Watchers remain discovery-only; no new feature, funds, deployment or PR.
+
 ## Durable send-once safety slice
 
 - Atomic reserve, permanent proof ownership and post_may_have_started before callback.

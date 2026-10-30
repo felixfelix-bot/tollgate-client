@@ -1,5 +1,38 @@
 # Safety milestone report
 
+## Send/terminal race correction (base 03bbbfed)
+
+Isolated branch `pr/send-terminal-race`; dirty main and reviewed source untouched.
+`finish` now acquires BEGIN IMMEDIATE before checking send ownership, including
+before terminal replay. Both release and settle share this path. Audit: reserve
+and send_once already validate replay/ownership under immediate transactions;
+observe_proofs is a single sticky UPDATE and delivery update does not change
+accounting/ownership. No other terminal insert path exists in production.
+
+Observed behavioral RED with original production logic (test module only added):
+- Deterministic release AND settle: terminal Ok, callback 1, usage 0, reopen false.
+- Public API stress, 2,000 sends each: release bypasses 1,994 / usage 6;
+  settle bypasses 1,902 / usage 98; both failed reopen. Both commands exited 101.
+- Deterministic test holds a real RESERVED lock, waits for the terminal connection's
+  SQLite busy handler via channels, commits a public send before resuming BEGIN.
+  No sleeps, fabricated ledger rows, production hooks or mocked transactions.
+
+GREEN: deterministic tests return Conflict, one callback, usage 9 and successful
+reopen/status-only replay. Both stress tests: zero bypasses, 2,000 callbacks,
+usage 2,000 on the following day, successful reopen with unchanged usage.
+Commands executed directly with exit status preserved, no tee/true masking:
+- `cargo test --locked --no-default-features --features persistence -- --nocapture`: 88 top-level passed.
+- `cargo test --locked --all-features`: 88 top-level passed.
+- `cargo test --locked --no-default-features` and `cargo test --locked`: 61 each.
+- `cargo test --locked --no-default-features --features persistence --test budget_crash -- --nocapture`: 7 passed.
+- `python3 tests/android_service_test.py`: 2 passed, zero buys.
+- `cargo fmt --check`, `git diff --check`: exit 0. Existing unrelated warnings remain.
+Counts exclude child-worker invocations. Logs in manager cache/scratch:
+`terminal-red-{boundary,stress}.log`, `terminal-green-{persistence,all,minimal,default,crash,android}.log`.
+No new coverage measurement, power-loss, Android persistence, funds or production
+transport claims. Watchers remain discovery-only; no new PR, merge or deployment.
+
+
 ## Durable send-once evidence
 
 Based on b0d5eef, isolated pr/durable-send-state worktree. Initial test command

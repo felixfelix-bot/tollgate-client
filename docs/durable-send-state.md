@@ -20,7 +20,10 @@ Disjoint operations may execute concurrently, within transactionally held caps.
 
 Every send stays quarantined with its full exposure, even after grant notices,
 refusals, or all-spent/all-unspent observations. Existing settle/release methods
-reject send-owned reservations. There is deliberately no recovery release path.
+reject send-owned reservations. The ownership check runs inside the same
+BEGIN IMMEDIATE transaction as terminal replay/insertion, so a concurrent send
+cannot slip between validation and release/settlement. There is deliberately
+no recovery release path.
 A crash after the mark but before bytes is indistinguishable from delivery;
 reopen only reports status. Failure saving a response leaves the prior Unknown.
 All-spent is sticky but proves neither which party consumed value nor access.
@@ -67,8 +70,14 @@ Failure injection uses SQLite abort triggers, not a real ENOSPC/fsync fault.
 The send interruption test unwinds at transport entry, not SIGKILL; inherited
 seven budget crash tests still exercise real SIGKILL and remain green.
 
-Full persistence and all-features suites: 84 top-level tests each, excluding four
-child worker executions. Minimal suite: 61. Android host tests: 2, zero buys.
+Race correction: deterministic SQLite busy-handler/channel tests for both terminal
+APIs failed on the original guard (accepted terminal write, lost exposure, invalid
+reopen) and pass with the transactional guard (Conflict, full exposure, reopen and
+status-only replay). Public API stress races 2,000 sends against each terminal API;
+zero bypasses after the fix. See REPORT.md for observed RED counts and log paths.
+Full persistence and all-features suites after correction: 88 top-level tests each,
+excluding four child worker executions. Default/minimal: 61 each. Android host: 2,
+zero buys; targeted budget crash suite: 7 passed. Prior coverage below was not rerun.
 Direct LLVM instrumentation of send_state suite: send_state.rs 85.71% lines,
 79.36% regions, 87.50% functions. Branch coverage unavailable (0 recorded).
 No device, power-loss, mint, real transport or internet evidence; no funds used.

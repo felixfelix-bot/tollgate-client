@@ -52,6 +52,10 @@ impl From<std::io::Error> for Error {
         Self::Io(e)
     }
 }
+#[cfg(test)]
+#[path = "../tests/support/terminal_boundary.rs"]
+mod terminal_boundary;
+
 pub type Result<T> = std::result::Result<T, Error>;
 pub struct BudgetStore {
     pub(crate) db: Connection,
@@ -285,18 +289,20 @@ impl BudgetStore {
     ) -> Result<()> {
         label(operation)?;
         label(reservation)?;
+        let (day, actual) = (number(day)?, number(actual)?);
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Serialize ownership validation with send_once and every terminal replay/write.
+        // A pre-transaction read could miss a send committed while waiting for this lock.
         // Send-owned exposure cannot be resolved by the accounting-only caller seam.
-        if self.db.query_row(
+        if tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sends WHERE operation=?1)",
             [reservation],
             |r| r.get::<_, bool>(0),
         )? {
             return Err(Error::Conflict);
         }
-        let (day, actual) = (number(day)?, number(actual)?);
-        let tx = self
-            .db
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let old = tx
             .query_row(
                 "SELECT reservation,kind,day,amount FROM operations WHERE id=?1",

@@ -36,7 +36,7 @@ shares nothing mutable with it.
   bounded by `min(limits.max_response_bytes, MAX_SESSION_BODY)`.
 - Body: a JSON object with a string `state`, mapped by **exact** match to
   `none`/`active`; everything else is `Unrecognized`. `allotment` must be a
-  positive integer (number or string), `metric` a non-empty string. The typed
+  positive integer (number or string), `metric` exactly `milliseconds` or `bytes`. The typed
   result also carries `raw_digest`, the SHA-256 of the exact answer bytes, so the
   record can be tied to a `curl /session-state` taken at the same moment.
 
@@ -106,11 +106,38 @@ Order is the contract:
 5. **Publish** — one evidence file, written temp → fsync → rename → dir fsync
    into a `0700` directory as `0600`.
 
+### Attribution and context limits
+
+Payment and session targets must have the same numeric IP **and port**; a
+mismatch is rejected before network I/O. Both use the supplied source/interface.
+Present session MACs must be colon-separated six-byte hexadecimal addresses;
+changes between baseline and post-state, disagreement with an actual notice MAC,
+or disagreement between notice and session metric yield `Unresolved`. Missing
+identity fields provide no attribution. The notice literal `device-identifier:
+mac` means an identifier **type**, never an actual MAC address.
+
+These checks do not solve races: another purchase may activate the session between
+baseline and POST. There is no purchase-bound session generation, authenticated
+receipt, or independent connectivity proof. **`reports_access()` is always false.**
+No verdict means that access was established by this purchase.
+
+Replay (including a concurrent ledger owner) preserves `send.delivery` as
+historical ledger evidence and returns `Unresolved` with
+`replay_provenance_unbound`. Fresh session reads cannot upgrade it: the ledger
+does not persist endpoint/device/offer/baseline provenance. No POST or automatic
+exposure release occurs on replay.
+
+Only the known metrics `milliseconds` and `bytes` are accepted; arbitrary strings
+are refused without copying them into evidence. Allotment is positive and bounded
+by u64, but neither offer price/quantity matching nor purchased quantity is proven:
+`offer_digest` is an opaque caller label, not a parsed offer. A well-formed notice
+is a gate claim, not proof of correct fulfillment.
+
 ### Verdicts
 
 | Verdict | Meaning | Reports access? |
 | --- | --- | --- |
-| `GrantAndSessionActive` | usable grant notice **and** an independently observed `active` session | **yes, only this** |
+| `GrantAndSessionActive` (legacy Rust name) | usable grant and context-consistent gate-reported active state; serialized as `grant_and_gate_reported_active_unattributed` | no |
 | `GrantWithoutSession` | grant notice, session never became active — money may be gone, access not obtained | no |
 | `SessionAlreadyActive` | baseline was already `active`, nothing sent | no |
 | `Refused` | the gate answered and it was not a usable grant, or the client refused to attempt | no |
@@ -135,8 +162,10 @@ post_session {...}|null, timestamps {started_unix, finished_unix, elapsed_ms},
 verdict, notes[]
 ```
 
-No bearer bytes, no token substring, no token-derived digest. Session/notice
-`raw_digest` values are digests of **the gate's answers**, which is what makes a
+No response-controlled free-form metrics or device strings are serialized. Metrics
+are allowlisted; invalid values produce fixed error tags. Caller labels must not
+contain secrets. Session/notice
+`raw_digest` values hash **the gate's answers** (possibly including reflected data), enabling a
 later reconciliation possible without keeping those answers. `OBSERVATION_SCHEMA`
 writes one `*.send.json` per forwarded body with the same discipline plus the
 endpoint digest and network fingerprint.
@@ -147,19 +176,20 @@ every digest is 64 hex characters.
 
 ## Evidence: tests
 
-`umask 077; TMPDIR=/dev/shm cargo test --features persistence` — 160 tests pass,
-of which 12 are `tests/capped_purchase.rs` and 6 are in-module.
+Run `umask 077; TMPDIR=/dev/shm cargo test --features persistence`.
+Regression tests additionally cover unbound replay, unrelated endpoints, reflected
+metrics, mismatched MAC/metric context, and literal `device-identifier: mac`.
 
 `tests/capped_purchase.rs` (loopback `TcpListener` only, assertions on what the
 **server** observed):
 
 | Test | Proves |
 | --- | --- |
-| `grant_plus_observed_active_session_is_the_only_access_verdict` | exactly one POST; grant + `none`→`active` yields the only access verdict; ≥2 GETs; evidence is strict JSON, token-free, one `*.send.json` |
+| `grant_plus_observed_active_session_is_unattributed` | exactly one POST; grant + `none`→`active` yields an explicitly unattributed gate report; ≥2 GETs; evidence is strict JSON, token-free, one `*.send.json` |
 | `grant_without_an_active_session_is_not_access_and_never_resends` | one POST, `GrantWithoutSession`, bounded polling, no access |
 | `an_already_active_session_refuses_with_zero_posts` | zero POSTs, one GET, `SessionAlreadyActive`, `delivery: "not_sent"` |
 | `an_ambiguous_answer_keeps_exposure_and_replay_is_status_only` | unframeable 200 → `Unknown`/`Unresolved`; session really opens and is still not called access; replay is status-only with one POST total |
-| `a_pre_send_refusal_is_recorded_as_unknown_not_as_a_grant_or_refusal` | dead payment port → transport ran, `pre_send_refusal: true`, `Unknown`, zero POSTs, replay still sends nothing |
+| `separate_payment_and_session_authorities_are_refused` | separate payment/session ports are rejected before any connection |
 | `a_redirect_on_the_session_reader_stops_the_purchase_before_any_send` | `302` → `baseline_error: "redirect"`, zero POSTs, `Location` never contacted |
 | `an_unrecognised_baseline_state_blocks_the_purchase` | `state: "provisioning"` → zero POSTs, `Unresolved` |
 | `the_session_reader_is_bound_to_the_numeric_target_and_interface` | one `GET /session-state`, no POST, active parsed with allotment/metric/digest; wrong path refused before I/O |

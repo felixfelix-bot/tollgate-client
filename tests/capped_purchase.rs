@@ -511,14 +511,16 @@ fn read_evidence(path: &std::path::Path, token: &str) -> StrictEvidence {
         parsed.timestamps
     );
     assert!(parsed.timestamps.elapsed_ms < 600_000, "bounded run");
-    assert!(!parsed.notes.is_empty() || parsed.verdict == "grant_and_session_active");
+    assert!(
+        !parsed.notes.is_empty() || parsed.verdict == "grant_and_gate_reported_active_unattributed"
+    );
     parsed
 }
 
 // ------------------------------------------------------------------ tests ----
 
 #[test]
-fn grant_plus_observed_active_session_is_the_only_access_verdict() {
+fn grant_plus_observed_active_session_is_unattributed() {
     let fixture = Fixture::new(10);
     let (token, digest) = fixture.token("grant-path", 2);
     let mut adapter = fixture.enroll();
@@ -537,7 +539,7 @@ fn grant_plus_observed_active_session_is_the_only_access_verdict() {
         "{:?}",
         published.evidence
     );
-    assert!(published.evidence.verdict.reports_access());
+    assert!(!published.evidence.verdict.reports_access());
     assert_eq!(
         published.evidence.post_session.as_ref().unwrap().phase,
         "active"
@@ -551,7 +553,10 @@ fn grant_plus_observed_active_session_is_the_only_access_verdict() {
     assert!(report.gets.iter().all(|g| g.contains("GET /session-state")));
 
     let strict = read_evidence(&published.path, &token);
-    assert_eq!(strict.verdict, "grant_and_session_active");
+    assert_eq!(
+        strict.verdict,
+        "grant_and_gate_reported_active_unattributed"
+    );
     assert_eq!(strict.operation, "capped-grant");
     assert_eq!(strict.send.delivery, "grant_notice");
     assert!(!strict.send.replayed);
@@ -696,7 +701,7 @@ fn an_ambiguous_answer_keeps_exposure_and_replay_is_status_only() {
 }
 
 #[test]
-fn a_pre_send_refusal_is_recorded_as_unknown_not_as_a_grant_or_refusal() {
+fn separate_payment_and_session_authorities_are_refused() {
     let fixture = Fixture::new(10);
     let (_token, digest) = fixture.token("pre-send-refusal", 2);
     let mut adapter = fixture.enroll();
@@ -711,25 +716,11 @@ fn a_pre_send_refusal_is_recorded_as_unknown_not_as_a_grant_or_refusal() {
     let sink = EvidenceSink::open(fixture.root.join("evidence")).unwrap();
     let session_addr = harness.addr;
     let request = fixture.request(dead_addr, session_addr, &digest, "capped-refused");
-    let published = purchase_once(&mut adapter, &request, &sink).expect("purchase");
+    assert!(purchase_once(&mut adapter, &request, &sink).is_err());
     let report = harness.finish();
-
-    assert_eq!(report.posts.len(), 0, "nothing was sent to the gate");
-    assert!(published.evidence.send.attempted, "the transport did run");
-    assert!(published.evidence.send.pre_send_refusal);
-    assert_eq!(published.evidence.send.delivery, "unknown");
-    assert_eq!(published.evidence.verdict, Verdict::Unresolved);
-    assert_eq!(published.evidence.baseline.as_ref().unwrap().phase, "none");
-
-    // Exposure is retained: the send mark was committed before the refusal, so a
-    // second call cannot send either.
-    let replay = purchase_once(&mut adapter, &request, &sink).expect("replay");
-    assert!(replay.evidence.send.replayed);
-    assert_eq!(replay.evidence.send.delivery, "unknown");
-    assert_eq!(replay.evidence.verdict, Verdict::Unresolved);
-    assert!(
-        report.posts.is_empty(),
-        "the replay sent nothing to the payment port"
+    assert_eq!(
+        report.connections, 0,
+        "mismatched authority refused before network"
     );
 }
 
@@ -1040,4 +1031,107 @@ fn a_non_2xx_or_unframed_session_answer_is_a_typed_error_not_a_guess() {
         );
         assert_eq!(harness.finish().posts.len(), 0, "{name}: no POST");
     }
+}
+
+#[test]
+fn safety_reported_active_is_never_purchase_attributed_and_replay_stays_historical() {
+    let fixture = Fixture::new(10);
+    let (_, digest) = fixture.token("semantics", 2);
+    let mut adapter = fixture.enroll();
+    let harness = Harness::new(gate(GRANT, Arc::new(AtomicBool::new(false)), true));
+    let sink = EvidenceSink::open(fixture.root.join("evidence")).unwrap();
+    let request = fixture.request(harness.addr, harness.addr, &digest, "semantics");
+    let first = purchase_once(&mut adapter, &request, &sink).unwrap();
+    assert_eq!(first.evidence.send.delivery, "grant_notice");
+    assert!(!first.evidence.verdict.reports_access());
+    let replay = purchase_once(&mut adapter, &request, &sink).unwrap();
+    assert_eq!(replay.evidence.verdict, Verdict::Unresolved);
+    assert!(replay.evidence.send.replayed);
+    assert_eq!(replay.evidence.send.delivery, "grant_notice");
+    assert_eq!(harness.finish().posts.len(), 1);
+}
+
+#[test]
+fn safety_unrelated_endpoint_is_rejected_before_network() {
+    let fixture = Fixture::new(10);
+    let (_, digest) = fixture.token("endpoint", 2);
+    let mut adapter = fixture.enroll();
+    let a = Harness::new(gate(GRANT, Arc::new(AtomicBool::new(false)), true));
+    let b = Harness::new(gate(GRANT, Arc::new(AtomicBool::new(false)), true));
+    let sink = EvidenceSink::open(fixture.root.join("evidence")).unwrap();
+    assert!(purchase_once(
+        &mut adapter,
+        &fixture.request(a.addr, b.addr, &digest, "endpoint"),
+        &sink
+    )
+    .is_err());
+    assert_eq!(a.finish().connections, 0);
+    assert_eq!(b.finish().connections, 0);
+}
+
+#[test]
+fn mismatched_device_or_metric_never_combines_grant_with_active() {
+    for active_body in [
+        r#"{"state":"active","mac":"11:22:33:44:55:66","metric":"milliseconds"}"#,
+        r#"{"state":"active","mac":"aa:bb:cc:dd:ee:ff","metric":"bytes"}"#,
+    ] {
+        let fixture = Fixture::new(10);
+        let (_, digest) = fixture.token("context-mismatch", 2);
+        let mut adapter = fixture.enroll();
+        let active = AtomicBool::new(false);
+        let harness = Harness::new(move |request| {
+            if request.starts_with(b"POST ") {
+                active.store(true, Ordering::SeqCst);
+                Some(response(200, GRANT))
+            } else {
+                Some(response(
+                    200,
+                    if active.load(Ordering::SeqCst) {
+                        active_body
+                    } else {
+                        SESSION_NONE
+                    },
+                ))
+            }
+        });
+        let sink = EvidenceSink::open(fixture.root.join("evidence")).unwrap();
+        let request = fixture.request(harness.addr, harness.addr, &digest, "mismatch");
+        let published = purchase_once(&mut adapter, &request, &sink).unwrap();
+        assert_eq!(published.evidence.verdict, Verdict::Unresolved);
+        assert!(published
+            .evidence
+            .notes
+            .iter()
+            .any(|note| note == "session_context_mismatch"));
+        assert_eq!(harness.finish().posts.len(), 1);
+    }
+}
+
+#[test]
+fn literal_mac_notice_is_a_type_not_a_device_address() {
+    let body = br#"{"kind":1022,"tags":[["allotment","1"],["metric","bytes"],["device-identifier","mac"]]}"#;
+    let parsed = tollgate_client_core::capped_purchase::parse_send_outcome(
+        tollgate_client_core::capped_purchase::SendOutcomeView::Complete { status: 200, body },
+    );
+    assert_eq!(parsed.delivery, DeliveryObservation::GrantNotice);
+    assert!(parsed.notice.unwrap().device_mac.is_none());
+}
+
+#[test]
+fn safety_reflected_metric_is_not_recorded() {
+    let body = br#"{"kind":1022,"tags":[["allotment","1"],["metric","cashuA_echoed_bearer"],["device-identifier","mac"]]}"#;
+    let mut transport = ObservingTransport::new(Fake {
+        outcome: Some(SendOutcome::Complete {
+            status: 200,
+            body: body.to_vec(),
+        }),
+        calls: 0,
+    });
+    assert_eq!(
+        transport.send(b"cashuA_echoed_bearer"),
+        DeliveryObservation::RefusalOrMalformed
+    );
+    assert!(!serde_json::to_string(transport.last().unwrap())
+        .unwrap()
+        .contains("cashuA_echoed_bearer"));
 }

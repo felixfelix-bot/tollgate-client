@@ -40,12 +40,10 @@
 //! discovered *before* the send mark is committed), a single bounded POST, and an
 //! evidence file that separates "no byte was written" from "we do not know".
 //!
-//! **A grant notice is not access.** [`Verdict::GrantAndSessionActive`] is the
-//! only verdict that reports access, and it needs a second, independent
-//! observation: a session read *after* the send that reports `active`. A notice
-//! without `allotment` and `metric`, a non-2xx answer, a body that is not kind
-//! 1022, an ambiguous read, or an active session nobody can explain are all
-//! [`Verdict::Refused`] or [`Verdict::Unresolved`] — never access.
+//! **No verdict establishes access.** A notice plus a later active session is
+//! only a gate-reported observation, not purchase attribution or data-plane
+//! proof. The protocol has no purchase-bound session generation. Historical
+//! delivery on replay remains historical even when the current gate is active.
 
 #[cfg(test)]
 #[path = "capped_wire_tests.rs"]
@@ -99,9 +97,9 @@ pub const OBSERVATION_SCHEMA: &str = "tollgate.capped-purchase.send-observation.
 /// "active" (which would hide a real failure).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionPhase {
-    /// Observed `none`: no access right now.
+    /// Gate reported `none`; not a data-plane measurement.
     Inactive,
-    /// Observed `active`: access right now.
+    /// Gate reported `active`; not proof of access or purchase attribution.
     Active,
     /// Any other value, or a missing `state` field.
     Unrecognized,
@@ -133,6 +131,7 @@ impl SessionPhase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionState {
     pub state: SessionPhase,
+    pub mac: Option<String>,
     pub allotment: Option<u64>,
     pub metric: Option<String>,
     pub raw_digest: String,
@@ -287,6 +286,10 @@ impl SessionReader {
             state,
             allotment,
             metric,
+            mac: session_mac(
+                &serde_json::from_slice(&body)
+                    .map_err(|_| SessionReadError::Malformed("not JSON"))?,
+            )?,
             raw_digest,
         })
     }
@@ -583,10 +586,10 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// Strict body parse: a JSON object with a string `state`, plus — when present —
-/// a non-zero integer `allotment` and a non-empty string `metric`.
+/// a non-zero integer `allotment` and a known `metric` (milliseconds or bytes).
 ///
 /// Unknown keys are tolerated because the gate's own answer also carries `status`
-/// and `mac`. A body that is not an object, or that has no usable `state`, is an
+/// and `mac` (validated if present). A body without a usable `state` is an
 /// error rather than a guessed phase.
 // Deserialize recursively rather than through Value's last-key-wins map.
 fn strict_json(body: &[u8]) -> Result<serde_json::Value, serde_json::Error> {
@@ -658,6 +661,7 @@ fn parse_session_body(
     let object = value
         .as_object()
         .ok_or(SessionReadError::Malformed("not an object"))?;
+    session_mac(&value)?;
     let state = object
         .get("state")
         .and_then(|v| v.as_str())
@@ -684,21 +688,44 @@ fn parse_session_body(
     };
     let metric = match object.get("metric") {
         None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(s)) if !s.trim().is_empty() => Some(s.clone()),
+        Some(serde_json::Value::String(s)) if known_metric(s) => Some(s.clone()),
         Some(_) => return Err(SessionReadError::Malformed("bad metric")),
     };
     Ok((SessionPhase::from_wire(state), allotment, metric))
 }
 
+fn known_metric(value: &str) -> bool {
+    matches!(value, "milliseconds" | "bytes")
+}
+
+fn valid_mac(value: &str) -> bool {
+    value.len() == 17
+        && value.split(':').count() == 6
+        && value
+            .split(':')
+            .all(|part| part.len() == 2 && part.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+fn session_mac(value: &serde_json::Value) -> Result<Option<String>, SessionReadError> {
+    match value.get("mac") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) if valid_mac(s) => Ok(Some(s.to_ascii_lowercase())),
+        _ => Err(SessionReadError::Malformed("bad device")),
+    }
+}
+
 // ----------------------------------------------------------- observation -----
 
 /// A usable kind-1022 grant notice: `200`, `kind: 1022`, one `allotment` tag that
-/// parses to a non-zero integer, and one non-empty `metric` tag.
+/// parses to a non-zero integer, and one known `metric` tag.
 ///
 /// The notice is evidence that *the gate claims* it granted something. It is not
 /// evidence that this device has access — see [`purchase_once`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GrantNotice {
+    /// Actual address only; the protocol literal `mac` is an identifier type, not an address.
+    #[serde(skip)]
+    pub device_mac: Option<String>,
     pub allotment: u64,
     pub metric: String,
     pub raw_digest: String,
@@ -807,6 +834,8 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
         .ok_or("no_tags")?;
     let mut allotment: Option<u64> = None;
     let mut metric: Option<String> = None;
+    let mut device_mac = None;
+    let mut device_seen = false;
     for tag in tags {
         let pair = tag.as_array().ok_or("tag_not_array")?;
         if pair.len() != 2 {
@@ -833,10 +862,23 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
                 if metric.is_some() {
                     return Err("duplicate_metric".into());
                 }
-                if value.trim().is_empty() {
-                    return Err("empty_metric".into());
+                if !known_metric(value) {
+                    return Err("bad_metric".into());
                 }
                 metric = Some(value.to_string());
+            }
+            "device-identifier" => {
+                if device_seen {
+                    return Err("duplicate_device".into());
+                }
+                device_seen = true;
+                if value == "mac" {
+                    // Gate versions emit the identifier TYPE rather than an address.
+                } else if valid_mac(value) {
+                    device_mac = Some(value.to_ascii_lowercase());
+                } else {
+                    return Err("bad_device".into());
+                }
             }
             _ => {}
         }
@@ -844,6 +886,7 @@ fn notice_from_body(status: u16, body: &[u8]) -> Result<GrantNotice, String> {
     // Both are required: an allotment with no metric cannot become a rate, and a
     // metric with no allotment is not a grant this client could honour.
     Ok(GrantNotice {
+        device_mac,
         allotment: allotment.ok_or("no_allotment")?,
         metric: metric.ok_or("no_metric")?,
         raw_digest: sha256::Hash::hash(body).to_string(),
@@ -1027,11 +1070,11 @@ fn delivery_from_tag(tag: &str) -> Option<DeliveryObservation> {
 
 // -------------------------------------------------------------- evidence -----
 
-/// The verdict of one orchestration call. Only [`Verdict::GrantAndSessionActive`]
-/// means "this device has access right now".
+/// The verdict of one orchestration call. None proves device access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
-    /// A usable grant notice **and** a session read that reports `active`.
+    /// A usable grant notice and context-consistent gate-reported active state.
+    /// The legacy Rust variant name does NOT imply purchase attribution.
     GrantAndSessionActive,
     /// A usable grant notice, but the session never became active. Money may be
     /// gone and access was not obtained: this is the case that must reach a human.
@@ -1049,7 +1092,7 @@ pub enum Verdict {
 impl Verdict {
     pub fn as_str(self) -> &'static str {
         match self {
-            Verdict::GrantAndSessionActive => "grant_and_session_active",
+            Verdict::GrantAndSessionActive => "grant_and_gate_reported_active_unattributed",
             Verdict::GrantWithoutSession => "grant_without_session",
             Verdict::SessionAlreadyActive => "session_already_active",
             Verdict::Refused => "refused",
@@ -1057,9 +1100,9 @@ impl Verdict {
         }
     }
 
-    /// The single gate on the phrase "access". Nothing else may report it.
+    /// This protocol supplies no purchase-bound or data-plane proof of access.
     pub fn reports_access(self) -> bool {
-        matches!(self, Verdict::GrantAndSessionActive)
+        false
     }
 }
 
@@ -1387,8 +1430,7 @@ fn ledger_delivery(
 
 /// Classify what the ledger knows plus what the session says.
 ///
-/// This is the single place where "access" may be concluded, and it demands both
-/// halves: a usable grant notice *and* an independently observed `active` session.
+/// Classifications are gate claims, never purchase-attributed access.
 fn judge(delivery: DeliveryObservation, active: bool, notes: &mut Vec<String>) -> Verdict {
     match delivery {
         DeliveryObservation::GrantNotice if active => Verdict::GrantAndSessionActive,
@@ -1400,7 +1442,7 @@ fn judge(delivery: DeliveryObservation, active: bool, notes: &mut Vec<String>) -
         DeliveryObservation::Unknown => {
             notes.push("delivery_unknown_exposure_retained".into());
             if active {
-                // Access is real but not attributable to a grant this client saw:
+                // The gate reports active, but it is not attributable to this purchase:
                 // reporting it as "granted" would claim evidence we do not have.
                 notes.push("session_active_without_grant_notice".into());
             }
@@ -1418,7 +1460,7 @@ fn judge(delivery: DeliveryObservation, active: bool, notes: &mut Vec<String>) -
 ///    classified. This check comes before the baseline so a replay of an
 ///    unresolved attempt is never mislabelled as "access already exists".
 /// 2. **Baseline** (the preflight reachability check). Read the session. `active`
-///    means access already exists: refuse before any send (zero POSTs).
+///    means the gate reports active: refuse before any send (zero POSTs).
 ///    Unreadable or unrecognised means no trustworthy baseline: refuse before any
 ///    send, because sending would commit the irreversible mark against a state
 ///    that cannot be compared afterwards.
@@ -1427,8 +1469,7 @@ fn judge(delivery: DeliveryObservation, active: bool, notes: &mut Vec<String>) -
 ///    is discovered here, and is itself treated as a replay.
 /// 4. **Observe** — bounded polling of the same endpoint, only when the gate may
 ///    have acted on us.
-/// 5. **Publish** — one evidence record. Access is reported only when a grant
-///    notice *and* an `active` session read were both observed.
+/// 5. **Publish** — one evidence record. No verdict reports established access.
 pub fn purchase_once(
     adapter: &mut PolicyAdapter,
     request: &PurchaseRequest<'_>,
@@ -1439,6 +1480,12 @@ pub fn purchase_once(
     let reference = parse_reference(&request.reference)?;
     if request.operation.is_empty() || request.operation.len() > 128 {
         return Err(PurchaseError::InvalidRequest("operation label"));
+    }
+
+    if request.pay_target.addr() != request.session_target.addr() {
+        return Err(PurchaseError::InvalidRequest(
+            "payment/session authority mismatch",
+        ));
     }
 
     let vault = ProtectedTokenVault::open(&request.vault_path)
@@ -1503,11 +1550,8 @@ pub fn purchase_once(
             {
                 notes.push("post_session_unrecognized".into());
             }
-            let active = post_session
-                .as_ref()
-                .map(|s| s.is_active())
-                .unwrap_or(false);
-            verdict = judge(delivery, active, &mut notes);
+            notes.push("replay_provenance_unbound".into());
+            verdict = Verdict::Unresolved;
         }
         None => match (&baseline, &baseline_error) {
             (_, Some(_)) => {
@@ -1643,7 +1687,32 @@ pub fn purchase_once(
                             .as_ref()
                             .map(|s| s.is_active())
                             .unwrap_or(false);
-                        verdict = judge(delivery, active, &mut notes);
+                        let context_matches = match (&baseline, &post_session, &send.notice) {
+                            (Some(before), Some(after), Some(notice)) => {
+                                before.mac == after.mac
+                                    && notice
+                                        .device_mac
+                                        .as_ref()
+                                        .map(|mac| Some(mac) == after.mac.as_ref())
+                                        .unwrap_or(true)
+                                    && after
+                                        .metric
+                                        .as_ref()
+                                        .map(|metric| metric == &notice.metric)
+                                        .unwrap_or(true)
+                            }
+                            _ => true,
+                        };
+                        verdict = if replaying {
+                            notes.push("replay_provenance_unbound".into());
+                            Verdict::Unresolved
+                        } else if !context_matches {
+                            notes.push("session_context_mismatch".into());
+                            Verdict::Unresolved
+                        } else {
+                            notes.push("purchase_access_attribution_unavailable".into());
+                            judge(delivery, active, &mut notes)
+                        };
                     }
                 }
             }
@@ -1780,6 +1849,12 @@ mod tests {
     }
 
     #[test]
+    fn safety_session_metric_and_device_are_validated() {
+        assert!(parse_session_body(br#"{"state":"active","metric":"cashuA_reflected"}"#).is_err());
+        assert!(parse_session_body(br#"{"state":"active","mac":"mac"}"#).is_err());
+    }
+
+    #[test]
     fn session_phase_never_guesses() {
         assert_eq!(SessionPhase::from_wire("none"), SessionPhase::Inactive);
         assert_eq!(SessionPhase::from_wire("active"), SessionPhase::Active);
@@ -1835,7 +1910,7 @@ mod tests {
     }
 
     #[test]
-    fn only_one_verdict_reports_access() {
+    fn no_verdict_reports_access() {
         for verdict in [
             Verdict::GrantWithoutSession,
             Verdict::SessionAlreadyActive,
@@ -1844,7 +1919,7 @@ mod tests {
         ] {
             assert!(!verdict.reports_access(), "{verdict:?}");
         }
-        assert!(Verdict::GrantAndSessionActive.reports_access());
+        assert!(!Verdict::GrantAndSessionActive.reports_access());
         assert_eq!(
             serde_json::to_string(&Verdict::GrantWithoutSession).unwrap(),
             "\"grant_without_session\""

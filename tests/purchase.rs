@@ -27,7 +27,8 @@ fn a_200_with_a_session_event_is_a_grant() {
         classify_response(200, &session_event()),
         PaymentOutcome::Granted {
             allotment: Some(60_000),
-            metric: Some("milliseconds".to_string())
+            metric: Some("milliseconds".to_string()),
+            device_identifier: None
         }
     );
 }
@@ -78,14 +79,16 @@ fn a_400_with_an_unparseable_body_is_ambiguous() {
 fn a_200_carrying_a_notice_event_is_not_a_grant() {
     assert!(matches!(
         classify_response(200, &notice_event("client-not-registered", "no session")),
-        PaymentOutcome::Refused { .. } | PaymentOutcome::Ambiguous { .. }
+        PaymentOutcome::Refused { .. }
+            | PaymentOutcome::Ambiguous { .. }
+            | PaymentOutcome::Retryable { .. }
     ));
 }
 
 #[test]
 fn states_move_forward_only() {
     assert_eq!(
-        next_state(IntentState::Pending, &PaymentOutcome::Granted { allotment: None, metric: None }).unwrap(),
+        next_state(IntentState::Pending, &PaymentOutcome::Granted { allotment: None, metric: None, device_identifier: None }).unwrap(),
         IntentState::Granted
     );
     assert_eq!(
@@ -99,7 +102,7 @@ fn states_move_forward_only() {
     );
     // You cannot un-refuse a definitive refusal into a grant.
     assert!(matches!(
-        next_state(IntentState::Refused, &PaymentOutcome::Granted { allotment: None, metric: None }),
+        next_state(IntentState::Refused, &PaymentOutcome::Granted { allotment: None, metric: None, device_identifier: None }),
         Err(TransitionError { .. })
     ));
 }

@@ -19,14 +19,20 @@ pub enum PaymentOutcome {
     Granted {
         allotment: Option<u64>,
         metric: Option<String>,
+        /// The module stamps the MAC it answered for (ADR-0007). A client must
+        /// compare it with its own MAC: a mismatch means a proxy/NAT path and the
+        /// value is already spent.
+        device_identifier: Option<String>,
     },
-    Refused {
-        code: String,
-        message: String,
-    },
-    Ambiguous {
-        reason: String,
-    },
+    /// The gate refused and the note was **not** taken. Terminal.
+    Refused { code: String, message: String },
+    /// Nothing was consumed; the same note may be sent again after a backoff.
+    Retryable { code: String, message: String },
+    /// The value is gone (spent, or on a retired keyset). Terminal, and it must
+    /// be surfaced to the user rather than silently retried.
+    ValueLost { code: String, message: String },
+    /// The note may already be spent. Never resend without a NUT-07 answer.
+    Ambiguous { reason: String },
     /// The mint answered the ambiguity: the note is spent (grant is owed) or
     /// unspent (safe to retry).
     Reconciled { spent: bool },
@@ -37,7 +43,9 @@ pub enum IntentState {
     Pending,
     Granted,
     Refused,
+    Retryable,
     Ambiguous,
+    Lost,
     Spent,
     Unspent,
 }
@@ -96,25 +104,70 @@ pub fn classify_response(status: u16, body: &str) -> PaymentOutcome {
         (200, Some(1022)) => PaymentOutcome::Granted {
             allotment: number_after(body, "allotment"),
             metric: string_after(body, "metric"),
+            device_identifier: string_after(body, "device-identifier"),
         },
-        (400, Some(21023)) => PaymentOutcome::Refused {
-            code: string_after(body, "code").unwrap_or_else(|| "unknown".to_string()),
-            message: string_after(body, "message").unwrap_or_default(),
-        },
-        // The gate's own internal error: it may have taken the note already.
+        // A notice event is not automatically a refusal: the module's own codes
+        // say whether the note survived. See `by_code`.
         (s, Some(21023)) if s >= 500 => PaymentOutcome::Ambiguous {
             reason: format!(
                 "gate answered {s} ({}); the note may be spent",
                 string_after(body, "code").unwrap_or_else(|| "unknown".into())
             ),
         },
-        (200, Some(21023)) => PaymentOutcome::Refused {
-            code: string_after(body, "code").unwrap_or_else(|| "unknown".to_string()),
-            message: string_after(body, "message").unwrap_or_default(),
-        },
+        (_, Some(21023)) => by_code(
+            &string_after(body, "code").unwrap_or_else(|| "unknown".to_string()),
+            &string_after(body, "message").unwrap_or_default(),
+        ),
         _ => PaymentOutcome::Ambiguous {
             reason: format!("unclassifiable answer: HTTP {status}"),
         },
+    }
+}
+
+/// The module's kind:21023 codes, classified by what they say about the note.
+/// Source: docs/client/v1-client-contract.md §5 (every code cited to merchant.go).
+///
+/// An unknown code is **ambiguous** on purpose: a future code we do not
+/// understand must never be read as "safe to resend".
+fn by_code(code: &str, message: &str) -> PaymentOutcome {
+    let refused = [
+        "invalid-mac-address",
+        "payment-error-invalid-token",
+        "payment-error-below-swap-fee",
+        "payment-processing-failed",
+        "session-error",
+    ];
+    let retryable = [
+        "device-unresolved",
+        "client-not-registered",
+        "mint-rate-limited",
+        "payment-error-mint-unreachable",
+        "service-unavailable",
+        "starting",
+    ];
+    let ambiguous = [
+        "payment-duplicate-inflight",
+        "payment-received-grant-pending",
+        "payment-outcome-unknown",
+    ];
+    let lost = ["payment-error-token-spent", "payment-error-keyset-expired"];
+
+    let m = message.to_string();
+    let c = code.to_string();
+    if refused.contains(&code) {
+        PaymentOutcome::Refused { code: c, message: m }
+    } else if retryable.contains(&code) {
+        PaymentOutcome::Retryable { code: c, message: m }
+    } else if ambiguous.contains(&code) {
+        PaymentOutcome::Ambiguous {
+            reason: format!("{code}: {message}"),
+        }
+    } else if lost.contains(&code) {
+        PaymentOutcome::ValueLost { code: c, message: m }
+    } else {
+        PaymentOutcome::Ambiguous {
+            reason: format!("unrecognised code {code}: {message}"),
+        }
     }
 }
 
@@ -126,9 +179,21 @@ pub fn next_state(
 ) -> Result<IntentState, TransitionError> {
     use IntentState::*;
     match (current, outcome) {
-        (Granted, _) | (Spent, _) => Ok(current),
+        (Granted, _) | (Spent, _) | (Lost, _) => Ok(current),
         (Pending, PaymentOutcome::Granted { .. }) => Ok(Granted),
         (Pending, PaymentOutcome::Refused { .. }) => Ok(Refused),
+        (Pending, PaymentOutcome::Retryable { .. }) => Ok(Retryable),
+        (Pending, PaymentOutcome::ValueLost { .. }) => Ok(Lost),
+        (Retryable, PaymentOutcome::Granted { .. }) => Ok(Granted),
+        (Retryable, PaymentOutcome::Refused { .. }) => Ok(Refused),
+        (Retryable, PaymentOutcome::ValueLost { .. }) => Ok(Lost),
+        (Retryable, PaymentOutcome::Ambiguous { .. }) => Ok(Ambiguous),
+        (Retryable, PaymentOutcome::Retryable { .. }) => Ok(Retryable),
+        (Retryable, PaymentOutcome::Reconciled { .. }) => Err(TransitionError {
+            reason: "nothing was ambiguous; reconciliation does not apply".into(),
+        }),
+        (Ambiguous, PaymentOutcome::ValueLost { .. }) => Ok(Lost),
+        (Ambiguous, PaymentOutcome::Retryable { .. }) => Ok(Ambiguous),
         (Pending, PaymentOutcome::Ambiguous { .. }) => Ok(Ambiguous),
         (Pending, PaymentOutcome::Reconciled { .. }) => Err(TransitionError {
             reason: "nothing was ambiguous yet; reconciliation is not a purchase step".into(),

@@ -1,0 +1,10 @@
+[package]
+name = "tollgate-client-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "TollGate v1 client core: discovery, Cashu purchase, reliability/price/quality scoring"
+
+[lib]
+name = "tollgate_client_core"
+path = "src/lib.rs"

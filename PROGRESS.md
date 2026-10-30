@@ -1,3 +1,10 @@
+## Ledger storage hardening
+
+- Added stable trusted-ancestry validation and explicit SQLite Unix VFS NOFOLLOW opens; unsafe ledger/auxiliary nodes and stranded enrollment recovery fail closed.
+- RED: five regression tests failed before fix. GREEN: seven storage cases; full harness, production persistence and minimal suites pass, including concurrency and SIGKILL recovery.
+- Instrumented storage coverage: 92.86% lines, 91.18% regions, 100% functions. Evidence logs remain local in the ledger-storage worktree.
+- See docs/ledger-storage.md for exact permissions, VFS source semantics, test commands and exclusions. Same-UID/root, rollback, power loss and device acceptance remain excluded; no funds/transport/autobuy changes.
+
 ## Policy/ledger binding hardening
 
 - Strict duplicate rejection now includes nested cap-map keys (top-level duplicate and unknown fields already use serde strict structs). Caps/fees are integer u64 values bounded by SQLite i64, never floating-point budgets.

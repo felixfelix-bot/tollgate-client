@@ -78,7 +78,8 @@ impl BudgetStore {
     /// Explicit enrollment only. Never overwrites or repairs an existing ledger.
     /// Parent must already exist on a private, local, durable filesystem.
     pub fn create(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+        let checked = crate::ledger_storage::checked_path(path.as_ref(), true)?;
+        let path = checked.as_path();
         let mut opts = OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
@@ -102,9 +103,15 @@ impl BudgetStore {
         Self::open(path)
     }
     fn connect(path: &Path) -> Result<Connection> {
-        let db = Connection::open_with_flags(
+        let path = crate::ledger_storage::checked_path(path, false)?;
+        // Use the audited bundled Unix VFS explicitly. NOFOLLOW rejects symlink
+        // resolution by xFullPathname; stable trusted ancestry is also required.
+        let db = Connection::open_with_flags_and_vfs(
             path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            "unix",
         )?;
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", true)?;

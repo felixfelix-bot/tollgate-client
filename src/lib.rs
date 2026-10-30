@@ -18,6 +18,8 @@ pub mod http;
 #[cfg(feature = "android")]
 pub mod jni;
 pub mod json;
+#[cfg(feature = "persistence")]
+mod ledger_storage;
 pub mod lightning;
 mod mint_identity;
 pub mod netcfg;

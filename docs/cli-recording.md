@@ -35,6 +35,7 @@ zero records and retained usage. That pause option is rejected in normal builds.
 
 Remaining gates: independent review; authenticated mint/snapshot and clock, proof spendability,
 network/entitlement binding, reconciliation, actual settlement and verified access. Existing
-same-UID/root mutation and rollback exclusions remain: duplicate cap-map keys, ledger symlinks,
-and missing policy/ledger identity binding are not fixed here. The marker is namespace separation,
+same-UID/root mutation and rollback exclusions remain. Duplicate cap-map keys and policy/ledger
+identity binding are now rejected/bound; bounded ledger filesystem protection is documented in
+[ledger-storage.md](ledger-storage.md). The marker is namespace separation,
 not authentication against a malicious local user. Watchers remain discovery-only.

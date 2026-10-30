@@ -427,6 +427,32 @@ fn ambiguous_framing_is_refused_as_ambiguous() {
     }
 }
 
+/// A peer that claims a `usize::MAX` chunk size must not be able to wrap the
+/// running total past the size guard. Before `checked_add`, this summed to a
+/// small number in release (guard silently disarmed) and panicked in debug —
+/// and both happened *after* the token bytes had already been written, which
+/// escapes the three-way outcome entirely. It must be `Ambiguous::Oversized`.
+///
+/// The overflow needs a non-empty body first: with `body.len() == 0` the bare
+/// comparison already refuses. One small chunk followed by `ffffffffffffffff`
+/// is the shape that wrapped.
+#[test]
+fn chunk_size_overflow_is_oversized_not_a_panic() {
+    let harness = Harness::new(respond(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\na\r\nffffffffffffffff\r\n",
+    ));
+    let ctx = context("127.0.0.1");
+    let outcome = send(&harness, &ctx, "/", TOKEN);
+    harness.finish();
+    assert_eq!(
+        outcome,
+        SendOutcome::Ambiguous {
+            reason: AmbiguousReason::Oversized
+        },
+        "an unrepresentable total is oversized, never a panic and never a pass"
+    );
+}
+
 #[test]
 fn non_2xx_is_ambiguous_not_a_refusal() {
     for code in [400u16, 402, 409, 500, 503] {

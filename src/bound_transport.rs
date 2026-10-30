@@ -742,7 +742,16 @@ impl<'a> Conn<'a> {
                     }
                 }
             }
-            if body.len() + size > max {
+            // `checked_add`: a chunk size of `usize::MAX` (a lying peer can send
+            // `ffffffffffffffff`) made the sum wrap in release — silently
+            // disarming the size guard — and panic in debug *after* the token had
+            // already been written. Either way it escaped the three-way outcome.
+            // An unrepresentable total is, by definition, oversized.
+            if body
+                .len()
+                .checked_add(size)
+                .map_or(true, |total| total > max)
+            {
                 return Err(AmbiguousReason::Oversized);
             }
             self.take_exact(size, &mut body)?;

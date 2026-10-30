@@ -233,3 +233,65 @@ mod tests {
         assert_eq!(tags[0], vec!["metric".to_string(), "milliseconds".to_string()]);
     }
 }
+
+/// The Lightning lane, end to end: probe the advert, choose an offer, let the
+/// gate mint the invoice, pay it, poll until the gate opens.
+///
+/// No token is ever minted or held by the client on this path — which is why it
+/// works with no wallet at all.
+pub struct LightningReport {
+    pub advert_offers: usize,
+    pub decision: String,
+    pub status: Option<crate::lightning::InvoiceStatus>,
+}
+
+pub fn run_lightning(
+    gate_url: &str,
+    caps: &Caps,
+    histories: &HashMap<String, GatewayHistory>,
+    payer: &mut dyn crate::lightning::LightningPayer,
+    timeout_ms: u64,
+    poll_interval_ms: u64,
+    max_polls: u32,
+) -> Result<LightningReport, String> {
+    let (status_code, body) = http::request("GET", gate_url, None, timeout_ms)?;
+    if status_code != 200 {
+        return Err(format!("{gate_url} answered HTTP {status_code} on the advert probe"));
+    }
+    let kind = body
+        .split("\"kind\":")
+        .nth(1)
+        .and_then(|r| r.trim_start().chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok())
+        .ok_or_else(|| "advert body has no numeric kind".to_string())?;
+    let mut advert = parse_advertisement(kind, &extract_tags(&body)).map_err(|e| e.to_string())?;
+    advert.stamp_gateway(gate_url);
+
+    let decision = decide(&advert.offers, histories, caps, None)?;
+    let reason = format!("{decision:?}");
+    let status = match &decision {
+        crate::policy::Decision::Buy { gateway_id, steps, cost, .. } => {
+            let offer = advert
+                .offers
+                .iter()
+                .find(|o| &o.gateway_id == gateway_id)
+                .ok_or_else(|| "selected offer vanished".to_string())?;
+            let _ = (steps, cost);
+            Some(crate::lightning::buy(
+                gate_url,
+                offer.total_cost().round() as u64,
+                &offer.mint_url,
+                payer,
+                timeout_ms,
+                poll_interval_ms,
+                max_polls,
+            ).map_err(|e| e.to_string())?)
+        }
+        _ => None,
+    };
+
+    Ok(LightningReport {
+        advert_offers: advert.offers.len(),
+        decision: reason,
+        status,
+    })
+}

@@ -67,6 +67,22 @@ Two honest boundaries, both named in the code rather than papered over:
   identity of its own. It works, but identity and address should be separate
   fields before multi-gateway ranking is meaningful.
 
+## The Lightning lane (no wallet needed)
+
+```bash
+tollgate-agent --lightning --gate http://192.168.50.205:2121 \
+               --max-cost-per-minute 2 --poll-ms 1000
+```
+
+The gate creates the invoice (`POST /ln-invoice`), the client pays it, polls
+(`GET /ln-invoice?quote=…`) until `access_granted`. **Nothing is minted client-side**,
+so this lane needs no Cashu wallet at all. `ManualPayer` prints the BOLT11 for a
+human; an LN node implements the same `LightningPayer` trait and nothing else
+changes.
+
+A `503` with `code: access-grant-failed` is *paid-but-not-open*, which the client
+keeps polling and never treats as a failed payment — that distinction is a test.
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

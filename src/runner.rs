@@ -236,7 +236,9 @@ pub fn describe_gate(
     // The decision is a Rust enum, not a JSON type: render it as a *string* so the
     // whole document still parses. A UI that receives invalid JSON is a bug that
     // hides until someone points a parser at it.
-    let decision = format!("{decision:?}").replace('\\', "\\\\").replace('"', "\\\"");
+    let decision = format!("{decision:?}")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     Ok(format!(
         r#"{{"gate":"{}","offers":[{}],"decision":"{}"}}"#,
         gate_url,

@@ -40,6 +40,22 @@ fn arg(args: &[String], name: &str) -> Option<String> {
         .cloned()
 }
 
+/// A test mint pays its own invoices. Paying "nothing" is only honest when the
+/// mint is the one settling it, so this payer says so in its answer and waits
+/// for the quote to flip before cdk asks for the proofs.
+struct TestMintPayer;
+
+impl LightningPayer for TestMintPayer {
+    fn pay(&mut self, bolt11: &str, amount_sat: u64) -> Result<String, String> {
+        eprintln!(
+            "test-mint: {amount_sat} sat invoice not paid by us (the mint settles it): {}…",
+            &bolt11[..bolt11.len().min(24)]
+        );
+        std::thread::sleep(std::time::Duration::from_secs(6));
+        Ok("test-mint".to_string())
+    }
+}
+
 /// The cdk wallet, or a clear refusal in a build that was compiled without it.
 #[cfg(feature = "cdk")]
 fn cdk_wallet_from_args(args: &[String]) -> Result<Box<dyn Wallet>, (String, u8)> {
@@ -56,11 +72,17 @@ fn cdk_wallet_from_args(args: &[String]) -> Result<Box<dyn Wallet>, (String, u8)
         ));
     };
     let seed = load_seed(&seed_file).map_err(|e| (e, 78))?;
-    Ok(Box::new(CdkFunding::new(
-        seed,
-        db_dir,
-        Box::new(ManualPayer),
-    )))
+    let payer: Box<dyn LightningPayer> = if args.iter().any(|a| a == "--test-mint") {
+        Box::new(TestMintPayer)
+    } else {
+        Box::new(ManualPayer)
+    };
+    let margin = opt(args, "--token-margin", "TOLLGATE_TOKEN_MARGIN")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    Ok(Box::new(
+        CdkFunding::new(seed, db_dir, payer).with_margin(margin),
+    ))
 }
 
 #[cfg(not(feature = "cdk"))]

@@ -157,6 +157,7 @@ pub struct CdkFunding {
     seed: [u8; 64],
     db_dir: String,
     payer: Box<dyn LightningPayer>,
+    margin: u64,
 }
 
 impl CdkFunding {
@@ -165,7 +166,17 @@ impl CdkFunding {
             seed,
             db_dir: db_dir.into(),
             payer,
+            margin: 0,
         }
+    }
+
+    /// Extra sats minted above the price. A token worth exactly the price is
+    /// worth *less* after the mint's swap fee, and the real gate says so:
+    /// `payment-error-below-swap-fee`. Zero by default because it is real money,
+    /// not a rounding detail.
+    pub fn with_margin(mut self, margin: u64) -> Self {
+        self.margin = margin;
+        self
     }
 
     fn db_path(&self, mint_url: &str, unit: &str) -> String {
@@ -180,7 +191,7 @@ impl CdkFunding {
 impl crate::agent::Wallet for CdkFunding {
     fn mint_token(&mut self, mint_url: &str, unit: &str, amount: u64) -> Result<String, String> {
         let wallet = CdkWallet::open(mint_url, unit, &self.db_path(mint_url, unit), self.seed)?;
-        wallet.mint_token(amount, self.payer.as_mut())
+        wallet.mint_token(amount + self.margin, self.payer.as_mut())
     }
 
     fn is_spent(&mut self, token: &str) -> Result<bool, String> {

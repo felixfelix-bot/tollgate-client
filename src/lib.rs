@@ -12,9 +12,9 @@ pub mod agent;
 pub mod cdk_wallet;
 pub mod discovery;
 pub mod history;
+pub mod http;
 #[cfg(feature = "android")]
 pub mod jni;
-pub mod http;
 pub mod json;
 pub mod lightning;
 pub mod netcfg;

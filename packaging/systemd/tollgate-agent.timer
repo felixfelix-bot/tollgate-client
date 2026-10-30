@@ -1,0 +1,12 @@
+[Unit]
+Description=Re-check the gateway every few minutes (a session may have expired)
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=5min
+# Jitter so a fleet of clients does not hit one gate in lockstep.
+RandomizedDelaySec=90
+Unit=tollgate-agent.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,27 @@
+[Unit]
+Description=TollGate client — buy internet from the gateway we are routed through
+Documentation=https://github.com/felixfelix-bot/tollgate-client
+# A gate can only be reached once there is a link. This is deliberately not
+# ordered before network-online.target: the daemon wants to run *because* the
+# network came up, and it exits immediately when nothing is there.
+After=network.target
+ConditionPathExists=/etc/tollgate/agent.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/tollgate/agent.env
+# A fresh attempt id per invocation; the journal is what stops a duplicate.
+ExecStart=/bin/sh -c 'exec /usr/local/bin/tollgate-agent --auto --journal /var/lib/tollgate/journal.txt --attempt-id "$(date +%s)"'
+User=tollgate
+Group=tollgate
+StateDirectory=tollgate
+StateDirectoryMode=0700
+# The daemon needs nothing but the network and its own state.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

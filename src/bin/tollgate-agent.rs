@@ -55,16 +55,22 @@ fn load_seed(path: &str) -> Result<[u8; 64], String> {
     Ok(seed)
 }
 
+/// Flag first, then the environment, so systemd's EnvironmentFile is load-bearing
+/// rather than decorative.
+fn opt(args: &[String], flag: &str, env_key: &str) -> Option<String> {
+    arg(args, flag).or_else(|| std::env::var(env_key).ok().filter(|v| !v.trim().is_empty()))
+}
+
 fn lightning_main(args: &[String], gate: &str) -> ExitCode {
     if arg(args, "--amount").is_some() {
         eprintln!("note: --amount is ignored; the price comes from the advert");
     }
     let mut caps = Caps {
         preferred_unit: arg(args, "--unit").unwrap_or_else(|| "sat".to_string()),
-        max_cost_per_minute: arg(args, "--max-cost-per-minute")
+        max_cost_per_minute: opt(args, "--max-cost-per-minute", "TOLLGATE_MAX_COST_PER_MINUTE")
             .and_then(|v| v.parse().ok())
             .unwrap_or(2.0),
-        daily_budget: arg(args, "--daily-budget")
+        daily_budget: opt(args, "--daily-budget", "TOLLGATE_DAILY_BUDGET")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100.0),
         spent_today: arg(args, "--spent-today")
@@ -117,9 +123,27 @@ fn main() -> ExitCode {
     }
 
     let lightning_mode = args.iter().any(|a| a == "--lightning");
-    let Some(gate) = arg(&args, "--gate") else {
-        eprintln!("missing --gate; --help for usage");
-        return ExitCode::from(64);
+    // --auto asks the kernel where traffic is actually going: a gate is only a
+    // gate if the default route points at it.
+    let gate = match arg(&args, "--gate") {
+        Some(g) => g,
+        None if args.iter().any(|a| a == "--auto") => {
+            match tollgate_client_core::netcfg::default_gateway() {
+                Some(gw) => {
+                    let url = tollgate_client_core::netcfg::gate_url(&gw);
+                    eprintln!("AUTO gateway {gw} -> {url}");
+                    url
+                }
+                None => {
+                    eprintln!("no IPv4 default gateway; be online, or pass --gate");
+                    return ExitCode::from(69);
+                }
+            }
+        }
+        None => {
+            eprintln!("missing --gate (or --auto); --help for usage");
+            return ExitCode::from(64);
+        }
     };
 
     if lightning_mode {
@@ -130,20 +154,20 @@ fn main() -> ExitCode {
         eprintln!("missing required flag (--token-file, --journal, --attempt-id); --help for usage");
         return ExitCode::from(64);
     };
-    let token_file = arg(&args, "--token-file").unwrap_or_default();
-    if arg(&args, "--wallet").as_deref() != Some("cdk") && token_file.is_empty() {
+    let token_file = opt(&args, "--token-file", "TOLLGATE_TOKEN_FILE").unwrap_or_default();
+    if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() != Some("cdk") && token_file.is_empty() {
         eprintln!("missing --token-file (or use --wallet cdk); --help for usage");
         return ExitCode::from(64);
     }
 
     // Two funding sources behind one seam: a pre-funded note, or cdk minting on
     // demand (which pays the mint's BOLT11 through the payer before it returns).
-    let mut wallet: Box<dyn Wallet> = if arg(&args, "--wallet").as_deref() == Some("cdk") {
-        let Some(seed_file) = arg(&args, "--seed-file") else {
+    let mut wallet: Box<dyn Wallet> = if opt(&args, "--wallet", "TOLLGATE_WALLET").as_deref() == Some("cdk") {
+        let Some(seed_file) = opt(&args, "--seed-file", "TOLLGATE_SEED_FILE") else {
             eprintln!("--wallet cdk needs --seed-file (64 raw bytes, mode 0600)");
             return ExitCode::from(64);
         };
-        let Some(db_dir) = arg(&args, "--wallet-db") else {
+        let Some(db_dir) = opt(&args, "--wallet-db", "TOLLGATE_WALLET_DB") else {
             eprintln!("--wallet cdk needs --wallet-db (a directory, 0700)");
             return ExitCode::from(64);
         };
@@ -174,10 +198,10 @@ fn main() -> ExitCode {
 
     let caps = Caps {
         preferred_unit: arg(&args, "--unit").unwrap_or_else(|| "sat".to_string()),
-        max_cost_per_minute: arg(&args, "--max-cost-per-minute")
+        max_cost_per_minute: opt(&args, "--max-cost-per-minute", "TOLLGATE_MAX_COST_PER_MINUTE")
             .and_then(|v| v.parse().ok())
             .unwrap_or(2.0),
-        daily_budget: arg(&args, "--daily-budget")
+        daily_budget: opt(&args, "--daily-budget", "TOLLGATE_DAILY_BUDGET")
             .and_then(|v| v.parse().ok())
             .unwrap_or(100.0),
         spent_today: arg(&args, "--spent-today")

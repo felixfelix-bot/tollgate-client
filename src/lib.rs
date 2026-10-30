@@ -17,3 +17,4 @@ pub mod runner;
 pub mod json;
 pub mod lightning;
 pub mod cdk_wallet;
+pub mod netcfg;

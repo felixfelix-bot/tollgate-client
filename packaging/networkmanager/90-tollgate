@@ -1,0 +1,18 @@
+#!/bin/sh
+# NetworkManager dispatcher: buy the moment we join a network that might be a
+# gate. NM runs this as root with two arguments: interface, action.
+#
+# It never blocks the join: the systemd unit is a oneshot that exits at once if
+# the gateway is not a TollGate (the advert probe 404s / refuses).
+IFACE="$1"
+ACTION="$2"
+
+[ "$ACTION" = "up" ] || exit 0
+[ -x /usr/local/bin/tollgate-agent ] || exit 0
+
+# Only wired and wireless links; ignore tunnels, bridges, docker, VPN.
+case "$IFACE" in
+    lo|docker*|br-*|veth*|tun*|tap*|wg*|fips*|tailscale*|zt*) exit 0 ;;
+esac
+
+systemctl --no-block start tollgate-agent.service

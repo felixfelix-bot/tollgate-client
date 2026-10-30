@@ -105,6 +105,29 @@ mint). Completing a mint needs a live mint, which is the next step.
 The seed file is read only when `mode == 0600`; anything else is refused before
 any money moves.
 
+## Unattended on Debian
+
+```bash
+cargo build --release --bin tollgate-agent
+sudo ./packaging/install.sh
+```
+
+Installs `tollgate-agent`, a `systemd` oneshot + 5-minute timer (jittered, so a
+fleet does not hit one gate in lockstep), a NetworkManager dispatcher that fires
+on every link-up, and `/etc/tollgate/agent.env` holding the caps.
+
+`--auto` reads the live IPv4 default route instead of a configured address — a
+gate is only a gate if the kernel is routing through it:
+
+```
+$ tollgate-agent --auto --journal … --attempt-id 9
+AUTO gateway 192.168.50.1 -> http://192.168.50.1:2121/
+```
+
+Caps and funding come from the environment when no flag is given, so
+`agent.env` is load-bearing rather than decorative (verified: cap 10 → granted,
+cap 0.5 → the gate is never asked).
+
 ## Pending
 
 `:2121` probing + BSSID/probe-IE hints (needs a transport adapter per shell);

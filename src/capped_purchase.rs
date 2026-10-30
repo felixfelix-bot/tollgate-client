@@ -1076,8 +1076,8 @@ pub enum Verdict {
     /// A usable grant notice and context-consistent gate-reported active state.
     /// The legacy Rust variant name does NOT imply purchase attribution.
     GrantAndSessionActive,
-    /// A usable grant notice, but the session never became active. Money may be
-    /// gone and access was not obtained: this is the case that must reach a human.
+    /// A usable grant notice, but no active session was observed. Money may be
+    /// gone; actual access is unproven. This case must reach a human.
     GrantWithoutSession,
     /// The baseline session was already `active`, so nothing was sent.
     SessionAlreadyActive,

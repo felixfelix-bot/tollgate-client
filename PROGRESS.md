@@ -1,4 +1,14 @@
-## Capped purchase orchestration (2026-10-30)
+## Capped-purchase review fixes (supersedes access claims below)
+
+All six findings addressed: no verdict reports purchase-attributed access; replay stays unresolved without bound provenance; authority/device/metric consistency and fixed metric vocabulary; atomic no-replace evidence publication; total connect/write/read deadlines and poll caps; recursive duplicate JSON and strict HTTP/EOF checks. Literal device-identifier mac is not an address. No server capabilities invented.
+
+Regressions failed before implementation (six wire, three semantic integration, one parser). Integrated `TMPDIR=/dev/shm cargo test --features persistence` passes, including 49 library and 17 capped integration tests; fmt and diff checks pass. Separate target dirs prevent stale mutation binaries.
+
+Measured `cargo llvm-cov --features persistence --summary-only`: total lines 80.63%, regions 80.16%, functions 71.64%; capped_purchase.rs lines 83.51%, regions 82.88%, functions 78.95%. Line/region minimum met; function coverage below 80%. Logs: local reports/reviews/capped-integrated-{tests,coverage}.log.
+
+Fresh-context cold review approved delta at a0e00400ab848b5c29f6e72ffbf2b76335312e5e; actual model family unknown, so cross-family gate UNMET. Independent maintainer approval still owed. No funds, lab, deployment or merge. No data-plane/purchase attribution, expected-device binding, or offer quantity proof. EOF requires peers to honor Connection: close. Original feature retained; focused PR targets existing pr/capped-purchase branch.
+
+## Historical capped purchase orchestration (2026-10-30)
 
 - `src/capped_purchase.rs` connects the reviewed pieces: `SessionReader` (bounded
   read-only `GET /session-state` on the same numeric target + interface/source

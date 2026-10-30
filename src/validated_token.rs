@@ -316,12 +316,12 @@ mod tests {
             .unwrap();
         let mut db = BudgetStore::create(path.join("ledger")).unwrap();
         let mut sends = 0;
-        db.send_once(&first, "one", |_| {
+        db.send_once_nonproduction(&first, "one", |_| {
             sends += 1;
             DeliveryObservation::Unknown
         })
         .unwrap();
-        let second_result = db.send_once(&second, "two", |_| {
+        let second_result = db.send_once_nonproduction(&second, "two", |_| {
             sends += 1;
             DeliveryObservation::Unknown
         });
@@ -389,14 +389,14 @@ mod tests {
             let ledger = path.join("db");
             let mut db = BudgetStore::create(&ledger).unwrap();
             let mut calls = 0;
-            db.send_once(&first, "1", |_| {
+            db.send_once_nonproduction(&first, "1", |_| {
                 calls += 1;
                 DeliveryObservation::Unknown
             })
             .unwrap();
             drop(db);
             let mut db = BudgetStore::open(&ledger).unwrap();
-            let result = db.send_once(&second, "2", |_| {
+            let result = db.send_once_nonproduction(&second, "2", |_| {
                 calls += 1;
                 DeliveryObservation::Unknown
             });
@@ -427,6 +427,210 @@ mod tests {
             ));
             std::fs::remove_dir_all(path).unwrap();
         }
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[test]
+    fn opaque_boundary_rejects_mutable_claims_and_substitution() {
+        use crate::{budget_store::BudgetStore, token_vault::ProtectedTokenVault};
+        let mut bypasses = Vec::new();
+        for attack in 0..5 {
+            let path = std::path::PathBuf::from(format!(
+                "/dev/shm/opaque-red-{}-{attack}",
+                std::process::id()
+            ));
+            let vault = ProtectedTokenVault::open(&path).unwrap();
+            let (s, sk) = fixture();
+            let bytes = token(&s, vec![proof(&s, &sk, "opaque", 2)]).to_string();
+            let v = ValidatedToken::parse(bytes.as_bytes(), &s).unwrap();
+            let mut plan = v
+                .store_send_plan(
+                    &vault,
+                    SendContext {
+                        operation: "op".into(),
+                        network: "net".into(),
+                        day: 1,
+                        cap: 10,
+                    },
+                    FeeKnowledge::TrustedUpperBound(0),
+                )
+                .unwrap();
+            match attack {
+                0 => {
+                    plan.face = 1;
+                    plan.proofs[0].amount = 1;
+                }
+                1 => plan.proofs[0].y = "forged-y".into(),
+                2 => plan.vault = "00".repeat(32),
+                3 => plan.mint = "https://other.example".into(),
+                _ => (),
+            }
+            let mut db = BudgetStore::create(path.join("db")).unwrap();
+            let mut transport = RecordingTransport::default();
+            let result = db.send_validated(&plan, &vault, &s, &mut transport);
+            let delivered = transport.bodies;
+            drop(db);
+            std::fs::remove_dir_all(path).unwrap();
+            if (attack < 4 && result.is_ok())
+                || (attack == 4 && delivered != vec![bytes.as_bytes().to_vec()])
+            {
+                bypasses.push(attack);
+            }
+        }
+        assert!(bypasses.is_empty(), "accepted bypasses: {bypasses:?}");
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[derive(Default)]
+    struct RecordingTransport {
+        bodies: Vec<Vec<u8>>,
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    impl crate::validated_send::VerifiedBytesTransport for RecordingTransport {
+        fn send(&mut self, body: &[u8]) -> crate::send_state::DeliveryObservation {
+            self.bodies.push(body.to_vec());
+            crate::send_state::DeliveryObservation::Unknown
+        }
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[test]
+    fn verified_send_faults_replays_aliases_and_full_debit() {
+        use crate::{budget_store::BudgetStore, token_vault::ProtectedTokenVault};
+        for fault in 0..10 {
+            let path = std::path::PathBuf::from(format!(
+                "/dev/shm/opaque-fault-{}-{fault}",
+                std::process::id()
+            ));
+            let vault = ProtectedTokenVault::open(&path).unwrap();
+            let (s, sk) = fixture();
+            let t = token(&s, vec![proof(&s, &sk, "same", 2)]);
+            let bytes = t.to_string();
+            let v = parse(&t, &s).unwrap();
+            let context = || SendContext {
+                operation: "op".into(),
+                network: "net".into(),
+                day: 1,
+                cap: 3,
+            };
+            let mut plan = v
+                .store_send_plan(&vault, context(), FeeKnowledge::TrustedUpperBound(1))
+                .unwrap();
+            let file = path.join(&plan.vault);
+            let mut db = BudgetStore::create(path.join("db")).unwrap();
+            let mut transport = RecordingTransport::default();
+            match fault {
+                0 => std::fs::remove_file(&file).unwrap(),
+                1 => std::fs::write(&file, b"corrupt").unwrap(),
+                2 => plan.vault = "gg".repeat(32),
+                3 => plan.vault = "short".into(),
+                4 => plan.cap = 2,
+                5 => {
+                    let other = token(&s, vec![proof(&s, &sk, "different", 1)]).to_string();
+                    let r = vault.store(other.as_bytes()).unwrap();
+                    plan.vault = r.digest().iter().map(|b| format!("{b:02x}")).collect();
+                }
+                6 => {
+                    let r = vault.store(b"invalid-token").unwrap();
+                    plan.vault = r.digest().iter().map(|b| format!("{b:02x}")).collect();
+                }
+                7 => plan.unit = "msat".into(),
+                8 => plan.fee = u64::MAX,
+                _ => (),
+            }
+            let result = db.send_validated(&plan, &vault, &s, &mut transport);
+            if fault < 9 {
+                assert!(result.is_err(), "fault {fault}");
+                assert!(transport.bodies.is_empty());
+                assert!(db.send_status("op").is_err());
+            } else {
+                result.unwrap();
+                assert_eq!(transport.bodies, vec![bytes.as_bytes().to_vec()]);
+                drop(db);
+                db = BudgetStore::open(path.join("db")).unwrap();
+                db.send_validated(&plan, &vault, &s, &mut transport)
+                    .unwrap();
+                // A different vault reference for the same proofs must not resend.
+                let v3 = ValidatedToken::parse(t.to_v3_string().as_bytes(), &s).unwrap();
+                let mut second = v3
+                    .store_send_plan(&vault, context(), FeeKnowledge::TrustedUpperBound(1))
+                    .unwrap();
+                assert!(db
+                    .send_validated(&second, &vault, &s, &mut transport)
+                    .is_err());
+                second.operation = "new-operation".into();
+                second.cap = 100;
+                assert!(db
+                    .send_validated(&second, &vault, &s, &mut transport)
+                    .is_err());
+                let alias = TrustedMintSnapshot::new(
+                    MintUrl::from_str("https://MINT.example:443/").unwrap(),
+                    s.unit.clone(),
+                    s.keysets.clone(),
+                )
+                .unwrap();
+                db.send_validated(&plan, &vault, &alias, &mut transport)
+                    .unwrap();
+                assert_eq!(transport.bodies.len(), 1);
+                let sql = rusqlite::Connection::open(path.join("db")).unwrap();
+                let debit: i64 = sql
+                    .query_row("SELECT face+fee FROM reservations WHERE id='op'", [], |r| {
+                        r.get(0)
+                    })
+                    .unwrap();
+                assert_eq!(debit, 3);
+            }
+            drop(db);
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[cfg(all(feature = "persistence", target_os = "linux"))]
+    #[test]
+    fn verified_transport_panic_is_quarantined_on_restart() {
+        use crate::{budget_store::BudgetStore, token_vault::ProtectedTokenVault};
+        struct Interrupted;
+        impl crate::validated_send::VerifiedBytesTransport for Interrupted {
+            fn send(&mut self, _: &[u8]) -> crate::send_state::DeliveryObservation {
+                panic!("interrupted transport")
+            }
+        }
+        let path =
+            std::path::PathBuf::from(format!("/dev/shm/opaque-panic-{}", std::process::id()));
+        let vault = ProtectedTokenVault::open(&path).unwrap();
+        let (s, sk) = fixture();
+        let v = parse(&token(&s, vec![proof(&s, &sk, "panic", 2)]), &s).unwrap();
+        let plan = v
+            .store_send_plan(
+                &vault,
+                SendContext {
+                    operation: "op".into(),
+                    network: "net".into(),
+                    day: 1,
+                    cap: 10,
+                },
+                FeeKnowledge::TrustedUpperBound(0),
+            )
+            .unwrap();
+        let mut db = BudgetStore::create(path.join("db")).unwrap();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| db.send_validated(
+                &plan,
+                &vault,
+                &s,
+                &mut Interrupted
+            )))
+            .is_err()
+        );
+        drop(db);
+        let mut db = BudgetStore::open(path.join("db")).unwrap();
+        let mut transport = RecordingTransport::default();
+        db.send_validated(&plan, &vault, &s, &mut transport)
+            .unwrap();
+        let mut renamed = plan.clone();
+        renamed.operation = "other".into();
+        assert!(db
+            .send_validated(&renamed, &vault, &s, &mut transport)
+            .is_err());
+        assert!(transport.bodies.is_empty());
+        drop(db);
+        std::fs::remove_dir_all(path).unwrap();
     }
     fn fixture() -> (TrustedMintSnapshot, SecretKey) {
         let sk = SecretKey::from_str(&"01".repeat(32)).unwrap();

@@ -36,13 +36,13 @@ fn repeat_attempts_and_overlap_never_resend() {
     let mut s = BudgetStore::create(&p).unwrap();
     let mut posts = 0;
     let a = s
-        .send_once(&plan(), "tick-1", |_| {
+        .send_once_nonproduction(&plan(), "tick-1", |_| {
             posts += 1;
             DeliveryObservation::Unknown
         })
         .unwrap();
     assert_eq!(a.delivery, DeliveryObservation::Unknown);
-    s.send_once(&plan(), "tick-2", |_| {
+    s.send_once_nonproduction(&plan(), "tick-2", |_| {
         posts += 1;
         DeliveryObservation::GrantNotice
     })
@@ -51,7 +51,7 @@ fn repeat_attempts_and_overlap_never_resend() {
     let mut other = plan();
     other.operation = "other".into();
     assert!(s
-        .send_once(&other, "tick-3", |_| panic!("overlap POST"))
+        .send_once_nonproduction(&other, "tick-3", |_| panic!("overlap POST"))
         .is_err());
     assert_eq!(s.usage("sat", 2).unwrap(), 9);
     assert!(s.release("release", &plan().operation, 1).is_err());
@@ -62,12 +62,12 @@ fn interrupted_after_mark_reopen_is_status_only() {
     let p = path();
     let mut s = BudgetStore::create(&p).unwrap();
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        s.send_once(&plan(), "a", |_| panic!("interrupted before bytes"))
+        s.send_once_nonproduction(&plan(), "a", |_| panic!("interrupted before bytes"))
     }));
     drop(s);
     let mut s = BudgetStore::open(&p).unwrap();
     let status = s
-        .send_once(&plan(), "b", |_| panic!("second POST"))
+        .send_once_nonproduction(&plan(), "b", |_| panic!("second POST"))
         .unwrap();
     assert_eq!(status.delivery, DeliveryObservation::Unknown);
     for observation in [
@@ -77,7 +77,7 @@ fn interrupted_after_mark_reopen_is_status_only() {
     ] {
         s.observe_proofs(&plan().operation, observation).unwrap();
         let status = s
-            .send_once(&plan(), "c", |_| panic!("observation permits POST"))
+            .send_once_nonproduction(&plan(), "c", |_| panic!("observation permits POST"))
             .unwrap();
         assert!(!status.internet_verified);
         assert_eq!(status.proofs, observation);
@@ -91,11 +91,11 @@ fn persistence_failure_zero_post_and_atomic_claim() {
     let c = rusqlite::Connection::open(&p).unwrap();
     c.execute_batch("CREATE TRIGGER deny_send BEFORE INSERT ON sends BEGIN SELECT RAISE(ABORT,'injected persistence failure'); END;").unwrap();
     assert!(s
-        .send_once(&plan(), "a", |_| panic!("POST after write failure"))
+        .send_once_nonproduction(&plan(), "a", |_| panic!("POST after write failure"))
         .is_err());
     assert_eq!(s.usage("sat", 1).unwrap(), 0);
     c.execute_batch("DROP TRIGGER deny_send").unwrap();
-    s.send_once(&plan(), "b", |_| DeliveryObservation::RefusalOrMalformed)
+    s.send_once_nonproduction(&plan(), "b", |_| DeliveryObservation::RefusalOrMalformed)
         .unwrap();
     assert_eq!(s.usage("sat", 2).unwrap(), 9);
 }
@@ -103,7 +103,7 @@ fn persistence_failure_zero_post_and_atomic_claim() {
 fn send_worker() {
     if let Ok(p) = std::env::var("SEND_DB") {
         let mut s = BudgetStore::open(&p).unwrap();
-        s.send_once(&plan(), &std::process::id().to_string(), |_| {
+        s.send_once_nonproduction(&plan(), &std::process::id().to_string(), |_| {
             use std::io::Write;
             let mut f = std::fs::OpenOptions::new()
                 .append(true)
@@ -143,15 +143,15 @@ fn invalid_changed_and_old_schema_fail_closed() {
     let mut s = BudgetStore::create(&p).unwrap();
     let mut bad = plan();
     bad.proofs.push(bad.proofs[0].clone());
-    assert!(s.send_once(&bad, "a", |_| panic!()).is_err());
+    assert!(s.send_once_nonproduction(&bad, "a", |_| panic!()).is_err());
     bad = plan();
     bad.face = 7;
-    assert!(s.send_once(&bad, "a", |_| panic!()).is_err());
-    s.send_once(&plan(), "a", |_| DeliveryObservation::GrantNotice)
+    assert!(s.send_once_nonproduction(&bad, "a", |_| panic!()).is_err());
+    s.send_once_nonproduction(&plan(), "a", |_| DeliveryObservation::GrantNotice)
         .unwrap();
     bad = plan();
     bad.network = "different".into();
-    assert!(s.send_once(&bad, "a", |_| panic!()).is_err());
+    assert!(s.send_once_nonproduction(&bad, "a", |_| panic!()).is_err());
     drop(s);
     rusqlite::Connection::open(&p)
         .unwrap()
@@ -171,16 +171,18 @@ fn partial_overlap_reordered_proofs_and_accounting_replay() {
         keyset: "keyset".into(),
         amount: 4,
     });
-    s.send_once(&a, "first", |_| DeliveryObservation::Unknown)
+    s.send_once_nonproduction(&a, "first", |_| DeliveryObservation::Unknown)
         .unwrap();
     a.proofs.reverse();
-    s.send_once(&a, "next", |_| panic!("reordered POST"))
+    s.send_once_nonproduction(&a, "next", |_| panic!("reordered POST"))
         .unwrap();
     a.operation = "subset".into();
     a.proofs.pop();
     a.face = 4;
     a.cap = 100;
-    assert!(s.send_once(&a, "other", |_| panic!("subset POST")).is_err());
+    assert!(s
+        .send_once_nonproduction(&a, "other", |_| panic!("subset POST"))
+        .is_err());
     assert_eq!(s.usage("sat", 1).unwrap(), 9);
     s.reserve("accounting", "sat", 1, 8, 1, 100).unwrap();
     s.release("cancel", "accounting", 1).unwrap();
@@ -189,7 +191,7 @@ fn partial_overlap_reordered_proofs_and_accounting_replay() {
     b.cap = 100;
     b.proofs[0].y = "fresh-y".into();
     assert!(s
-        .send_once(&b, "attempt", |_| panic!("reservation replay POST"))
+        .send_once_nonproduction(&b, "attempt", |_| panic!("reservation replay POST"))
         .is_err());
 }
 #[test]
@@ -200,7 +202,7 @@ fn response_persistence_failure_keeps_durable_ambiguity() {
     c.execute_batch("CREATE TRIGGER deny_response BEFORE UPDATE ON sends BEGIN SELECT RAISE(ABORT,'response persistence failure'); END;").unwrap();
     let mut posts = 0;
     assert!(s
-        .send_once(&plan(), "a", |_| {
+        .send_once_nonproduction(&plan(), "a", |_| {
             posts += 1;
             DeliveryObservation::GrantNotice
         })
@@ -211,7 +213,7 @@ fn response_persistence_failure_keeps_durable_ambiguity() {
     drop(s);
     let mut s = BudgetStore::open(&p).unwrap();
     assert_eq!(
-        s.send_once(&plan(), "b", |_| panic!("resend"))
+        s.send_once_nonproduction(&plan(), "b", |_| panic!("resend"))
             .unwrap()
             .delivery,
         DeliveryObservation::Unknown

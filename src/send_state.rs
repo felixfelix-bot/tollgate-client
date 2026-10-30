@@ -11,7 +11,7 @@ pub struct TrustedProofIdentity {
 }
 /// Caller must validate canonical mint/Y, keyset/unit, amounts, durable vault content,
 /// and stable entitlement/network/generation identity. This type does NOT do so.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrustedSendPlan {
     pub operation: String,
     pub network: String,
@@ -70,13 +70,26 @@ fn status(db: &Connection, id: &str) -> Result<SendStatus> {
     })
 }
 impl BudgetStore {
+    /// NON-PRODUCTION legacy harness: trusts mutable claims and arbitrary payloads.
+    /// Never use for payment. Use `send_validated` for the offline verified-byte seam.
     /// Only the transaction that INSERTs the irreversible send mark calls transport.
     /// Exact replay is status-only, regardless of attempt ID. No retry capability
     /// escapes this call. Panic/death/error after commit permanently quarantines it.
-    pub fn send_once<F>(
+    pub fn send_once_nonproduction<F>(
         &mut self,
         p: &TrustedSendPlan,
         _caller_attempt: &str,
+        transport: F,
+    ) -> Result<SendStatus>
+    where
+        F: FnOnce(&TrustedSendPlan) -> DeliveryObservation,
+    {
+        self.send_derived(p, transport)
+    }
+
+    pub(crate) fn send_derived<F>(
+        &mut self,
+        p: &TrustedSendPlan,
         transport: F,
     ) -> Result<SendStatus>
     where

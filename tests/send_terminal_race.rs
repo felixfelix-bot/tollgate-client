@@ -47,7 +47,7 @@ fn race(settle: bool) {
             }],
         };
         barrier.wait();
-        let result = sender.send_once(&plan, "attempt", |_| {
+        let result = sender.send_once_nonproduction(&plan, "attempt", |_| {
             posts += 1;
             DeliveryObservation::Unknown
         });

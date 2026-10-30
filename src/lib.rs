@@ -29,5 +29,11 @@ pub mod scoring;
 pub mod send_state;
 #[cfg(all(feature = "cdk", any(target_os = "linux", target_os = "android")))]
 pub mod token_vault;
+#[cfg(all(
+    feature = "cdk",
+    feature = "persistence",
+    any(target_os = "linux", target_os = "android")
+))]
+pub mod validated_send;
 #[cfg(feature = "cdk")]
 pub mod validated_token;

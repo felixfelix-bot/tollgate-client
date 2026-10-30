@@ -1,5 +1,21 @@
 # Progress
 
+## Offline verified-byte boundary (2026-10-30)
+
+- `send_validated` re-loads digest-checked immutable vault bytes, rederives bearer
+  claims against the snapshot, rejects mutable-plan mismatch, durably reserves
+  full face plus trusted fee and claims ownership before typed transport sees
+  exactly those bytes. Legacy raw API renamed `send_once_nonproduction`.
+- RED reproduced all five mutable-claim/payload bypasses on the prior raw seam;
+  GREEN: 109 all-feature tests, 33 library; no-CDK persistence suite also passes.
+  Typed tests cover corrupt/missing/different vault objects, undercount, aliases,
+  retry/restart and panic quarantine. LLVM: new boundary 100% lines/functions,
+  98.39% regions; no branch coverage claim. Cold review: no bounded-scope blockers.
+- Snapshot/fee authenticity, network binding, policy and persistence/platform
+  assurance remain deferred. No CLI/JNI activation, real funds or deployment.
+  See [contract and evidence](docs/verified-send.md); earlier milestones below
+  describe their historical state, not permission to spend.
+
 ## Canonical mint identity repair (2026-10-30)
 
 - Shared real URL-parser policy fixes default-port alias ownership splits in

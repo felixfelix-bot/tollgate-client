@@ -56,7 +56,7 @@ fn terminal_waiting_for_writer(settle: bool) {
     };
     let mut calls = 0;
     sender
-        .send_once(&plan, "attempt", |_| {
+        .send_once_nonproduction(&plan, "attempt", |_| {
             calls += 1;
             DeliveryObservation::Unknown
         })
@@ -76,7 +76,7 @@ fn terminal_waiting_for_writer(settle: bool) {
     let mut reopened = reopened.unwrap();
     assert_eq!(reopened.usage("sat", 2).unwrap(), 9);
     reopened
-        .send_once(&plan, "replay", |_| panic!("resend"))
+        .send_once_nonproduction(&plan, "replay", |_| panic!("resend"))
         .unwrap();
     drop(reopened);
     std::fs::remove_dir_all(dir).unwrap();

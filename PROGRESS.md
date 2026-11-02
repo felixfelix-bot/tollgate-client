@@ -1,17 +1,20 @@
 ## Android hardened payment — first bounded milestone
 
 Branch `pr/android-hardened-payment`, based on live main `e49dcec27f48ed251b398d10d8d05bbb5a67eba9`.
-Head `d55db45213ffe0287f7dad8d5173bbf140568452`; consolidated PR
+Head `94e7ce6fc364cfddf9e637990f9da10c14e953c9`; consolidated PR
 https://github.com/felixfelix-bot/tollgate-client/pull/3 (open, NOT merged).
 Stages 1–4 continuation authorized; no spending enabled. See
 `reports/android-hardened-payment/REPORT.md` for build/test evidence and remaining gates.
 
 Implemented: ABI-compatible legacy buy tombstone, real JVM/socket RED→GREEN,
 explicit android-hardened feature, locked NDK library builder and shared target-directory contract.
-Remaining: cross-family independent cold review, pushed-SHA CI, Android ABI load/TLS/entropy,
-actual app-UID storage, Network-bound sockets, production intent/enrollment/consent,
-and real UI/executable integration. The shipped Linux tollgate-agent still uses
-legacy run_once/run_recorded, NOT the hardened purchase_once controller.
+Done since: cross-family cold review (APPROVED; two findings fixed, three recorded
+as open), CI green on the pushed head, both-ABI hardened library builds measured.
+Remaining: Android ABI job in CI, widened JNI boundary matrix, on-device ABI
+load/TLS/entropy, actual app-UID storage, Network-bound sockets, production
+intent/enrollment/consent, and real UI/executable integration. The shipped Linux
+tollgate-agent still uses legacy run_once/run_recorded, NOT the hardened
+purchase_once controller; neither the APK nor the CLI calls it yet.
 
 Final acceptance: phone AND computer seamlessly buy upstream internet from
 **tollgate-module-basic-go**, tested against real QEMU infrastructure under labgrid

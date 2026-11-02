@@ -58,10 +58,12 @@ root-owned 755 ancestors), `cargo test --locked --features android-hardened`:
 `reports/android-hardened-payment/host-full-tests.log`. This is a host suite on
 Linux: it does not prove Android behaviour.
 
-### 5. Android native build (measured, partial)
+### 5. Android native build (both ABIs measured)
 
 `TOLLGATE_ANDROID_FEATURE=android-hardened packaging/android/build-native.sh`
-(`--lib --locked`, NDK 26.1.10909125, API 26):
+(`--lib --locked`, NDK 26.1.10909125, API 26). Verbatim symbol/NEEDED evidence:
+`reports/android-hardened-payment/android-libs.txt`; full log
+`android-hardened-build.log`.
 
 - `aarch64-linux-android`: **built**. `libtollgate_client_core.so` is ELF 64-bit
   ARM aarch64; `DT_NEEDED` is only `libdl.so`, `libc.so` (bundled SQLite, static

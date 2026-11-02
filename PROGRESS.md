@@ -1,8 +1,10 @@
 ## Android hardened payment — first bounded milestone
 
 Branch `pr/android-hardened-payment`, based on live main `e49dcec27f48ed251b398d10d8d05bbb5a67eba9`.
-Head `94e7ce6fc364cfddf9e637990f9da10c14e953c9`; consolidated PR
-https://github.com/felixfelix-bot/tollgate-client/pull/3 (open, NOT merged).
+Head: the branch tip of PR #3 (this document is not re-stamped per docs commit;
+read the SHA from `git rev-parse origin/pr/android-hardened-payment`).
+Code-reviewed commit `94e7ce6`; later commits are docs-only.
+Consolidated PR https://github.com/felixfelix-bot/tollgate-client/pull/3 (open, NOT merged).
 Stages 1–4 continuation authorized; no spending enabled. See
 `reports/android-hardened-payment/REPORT.md` for build/test evidence and remaining gates.
 

@@ -31,6 +31,9 @@ document.
 
 ### 2. Explicit hardened feature and build contract
 
+- Wire change to note for UI authors: `capsFor` now emits `spent_today` as an
+  integer (`0`) via serde instead of the old hand-formatted `0.000`. Same JSON
+  number, integer spelling; no consumer here parses it yet.
 - `Cargo.toml`: `android = ["dep:jni","dep:serde","dep:serde_json"]`;
   `android-hardened = ["android","cdk","persistence"]`. The test harness feature is
   never implied.
@@ -87,10 +90,24 @@ Linux: it does not prove Android behaviour.
   --no-default-features --target aarch64-linux-android` (and `x86_64`).
 
 
-## Not verified — do not infer acceptance
+## Cross-family cold review
 
-- **Cross-family independent cold review: NOT DONE.** Required before this
-  milestone is accepted (the previous merge lacked it).
+Pinned `worker-reviewer-glm` profile (`tier/review-glm`), no tools, diff-only brief,
+author here is not GLM — verdict **APPROVED**, summary: no JNI path to a payment
+POST or to `FileWallet`/`run_once`/`FileJournal` remains in either feature build;
+tombstone reads no arguments or storage; feature composition correct. Six minor
+findings: (a) tombstone comment said "disabled even in android-hardened" while the
+symbol is exported — fixed to say refusal, not absent; (b) hardcoded NDK pin had
+no existence check — now fails with a clear message; (c) CI does not build either
+Android ABI, so the both-ABI claim rests on one-off local evidence; (d)
+`tests/android_build_test.py` asserts script text, not build behaviour; (e) the
+zero-POST guarantee is exercised against one loopback response shape only; (f)
+`capsFor.spent_today` integer spelling — documented above. Findings (c)–(e) are
+open and named in "Remaining integration seams".
+Note on independence: this is a cross-*family* review, not an independent
+maintainer approval; the reviewing profile runs under the same fleet identity.
+
+## Not verified — do not infer acceptance
 - **CI on the pushed SHA: GREEN now; earlier run was RED for a real reason.** Run
   41528425939 (`4fb1be8`) failed because `cdk-signatory 0.18.3`'s build script
   needs `protoc`, absent on the runner: `Could not find protoc ... apt-get
@@ -133,7 +150,10 @@ Linux: it does not prove Android behaviour.
 
 ## Remaining integration seams (next worker)
 
-1. Cross-family cold review of this diff; then CI green on the pushed SHA.
+1. Add an Android ABI build job to CI (cross-review finding c) so the both-ABI
+   claim is continuously verified, not one-off. Widen the JNI boundary test to
+   error/refusal response shapes and a second feature build (finding e), and make
+   the packaging assertion behavioural rather than substring-based (finding d).
 2. Android socket seam: injectable socket creation + `android_setsocknetwork`
    bound to a captured `Network` (keep Linux `SO_BINDTODEVICE` intact), shared by
    advert GET, session GET, POST and post-grant probes; network loss before send

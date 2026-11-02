@@ -6,6 +6,10 @@ cd "$REPO"
 ANDROID=${ANDROID_SDK_ROOT:-$HOME/android-sdk}
 NDK=${ANDROID_NDK_HOME:-$ANDROID/ndk/26.1.10909125}
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+[ -x "$TC/llvm-ar" ] || {
+    printf 'NDK toolchain not found at %s; set ANDROID_NDK_HOME to NDK r26 (API 26)\n' "$TC" >&2
+    exit 1
+}
 FEATURE=${TOLLGATE_ANDROID_FEATURE:-android}
 case "$FEATURE" in
     android|android-hardened) ;;

@@ -57,9 +57,10 @@ pub extern "system" fn Java_dev_tollgate_client_Core_describe(
     give(&mut env, out)
 }
 
-/// ABI-compatible tombstone. Never reads arguments, opens storage, or sends.
-/// Disabled even in android-hardened until a separately reviewed controller is
-/// integrated. There is no FileWallet/run_once fallback.
+/// ABI-compatible tombstone: the symbol stays exported so old binaries load,
+/// but it always refuses and never reads arguments, opens storage, or sends.
+/// It remains a refusal (not an absent export) in android-hardened builds until a
+/// separately reviewed controller is integrated. No FileWallet/run_once fallback.
 #[no_mangle]
 pub extern "system" fn Java_dev_tollgate_client_Core_buy(
     mut env: JNIEnv,

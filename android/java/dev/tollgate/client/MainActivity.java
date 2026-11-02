@@ -30,6 +30,11 @@ public class MainActivity extends Activity {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView out;
+    /** The buy button is disabled while a quote is outstanding: one attempt, one invoice. */
+    private Button buy;
+    /** The quote being paid, if any. Kept so "Check payment" polls the same quote. */
+    private String pendingQuote;
+    private String pendingGate;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -77,7 +82,17 @@ public class MainActivity extends Activity {
             }
         });
 
+        buy = new Button(this);
+        buy.setText("Buy access (Lightning)");
+        buy.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                buyAccess();
+            }
+        });
+
         root.addView(scan);
+        root.addView(buy);
         root.addView(token);
         root.addView(save);
         root.addView(service);
@@ -129,5 +144,108 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    /**
+     * Buy access over the Lightning lane.
+     *
+     * Two steps on purpose. The first asks the gate for a quote and shows the
+     * BOLT11; the customer pays it in whatever Lightning wallet they already
+     * have. The second polls the SAME quote until the gate reports
+     * {@code access_granted}. Nothing is paid by this app, and a quote that was
+     * paid but not granted is a retry — never a second invoice.
+     */
+    private void buyAccess() {
+        if (pendingQuote != null) {
+            pollPending();
+            return;
+        }
+        final String gw = defaultGateway();
+        if (gw == null) {
+            out.setText("No IPv4 default route: not on a network yet.");
+            return;
+        }
+        final String url = "http://" + gw + ":2121/";
+        final String mint = prefs().getString("mint", "http://127.0.0.1:3338/");
+        buy.setEnabled(false);
+        out.setText("asking " + url + " for a quote …");
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                final String json = Core.requestInvoice(url, 1L, mint, 8000L);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        buy.setEnabled(true);
+                        String q = field(json, "quote");
+                        if (q == null) {
+                            out.setText("no quote:\n\n" + json.replace(",", ",\n"));
+                            return;
+                        }
+                        pendingQuote = q;
+                        pendingGate = url;
+                        buy.setText("Check payment");
+                        out.setText("pay this invoice ("
+                                + field(json, "amount") + " sat):\n\n"
+                                + field(json, "invoice")
+                                + "\n\nthen tap \"Check payment\".");
+                    }
+                });
+            }
+        });
+    }
+
+    private void pollPending() {
+        final String url = pendingGate;
+        final String quote = pendingQuote;
+        buy.setEnabled(false);
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                final String json = Core.pollInvoice(url, quote, 8000L);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        buy.setEnabled(true);
+                        if (json.contains("\"access_granted\":true")) {
+                            pendingQuote = null;
+                            pendingGate = null;
+                            buy.setText("Buy access (Lightning)");
+                            out.setText("ACCESS GRANTED\n\n" + json.replace(",", ",\n"));
+                        } else if (json.contains("\"retry\":true")) {
+                            out.setText("paid, gate not open yet — tap again\n\n"
+                                    + json.replace(",", ",\n"));
+                        } else {
+                            out.setText("not granted yet\n\n" + json.replace(",", ",\n"));
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Read one flat string/number field out of the core's JSON.
+     *
+     * Deliberately not a JSON parser: the core emits a flat object with no
+     * nesting and no escaped quotes in the fields the UI reads, and pulling in
+     * a parser to read two keys would be more code than the whole shell. A
+     * missing key returns null, which every caller treats as "show it raw".
+     */
+    private static String field(String json, String key) {
+        String needle = "\"" + key + "\":";
+        int i = json.indexOf(needle);
+        if (i < 0) return null;
+        int start = i + needle.length();
+        if (start >= json.length()) return null;
+        char c = json.charAt(start);
+        if (c == '"') {
+            int end = json.indexOf('"', start + 1);
+            if (end < 0) return null;
+            return json.substring(start + 1, end);
+        }
+        int end = start;
+        while (end < json.length() && "-0123456789".indexOf(json.charAt(end)) >= 0) end++;
+        return end == start ? null : json.substring(start, end);
     }
 }

@@ -42,6 +42,8 @@ pub mod policy;
 pub mod purchase;
 pub mod runner;
 pub mod scoring;
+/// The JSON contract the Android shell parses for the Lightning lane.
+pub mod shell_json;
 #[cfg(feature = "persistence")]
 pub mod send_state;
 #[cfg(all(feature = "cdk", any(target_os = "linux", target_os = "android")))]

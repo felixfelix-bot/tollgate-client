@@ -1,7 +1,7 @@
 package dev.tollgate.client;
 
 /**
- * The only bridge to Rust. Two calls, both taking and returning JSON, so the
+ * The only bridge to Rust. Every call takes and returns JSON, so the
  * Kotlin/Java side never has to agree with Rust on a struct layout.
  */
 public final class Core {
@@ -23,4 +23,19 @@ public final class Core {
 
     /** Echo the caps as the core will apply them, so the UI shows the truth. */
     public static native String capsFor(String unit, double maxPerMinute, double dailyBudget);
+
+    /**
+     * Ask the gate to create a Lightning quote. Returns
+     * {@code {"quote","invoice","amount","mint_url","expiry"}} or {@code {"error":…}}.
+     * The BOLT11 in {@code invoice} is what the customer pays — no Cashu token
+     * exists on this device, so there is nothing here to lose if it is lost.
+     */
+    public static native String requestInvoice(String gateUrl, long amountSat, String mintUrl, long timeoutMs);
+
+    /**
+     * Poll a quote for access. {@code {"state","access_granted","allotment","metric"}}.
+     * {@code access_granted:true} is the only success signal; a
+     * {@code paid-but-not-granted} answer means retry, never pay again.
+     */
+    public static native String pollInvoice(String gateUrl, String quote, long timeoutMs);
 }

@@ -176,7 +176,19 @@ describe={"gate":"http://127.0.0.1:18212/","offers":[{"unit":"sat","price_per_st
           "decision":"Buy { gateway_id: …, steps: 1, cost: 2.0, unit: \"sat\" }"}
 ```
 
-The foreground service polls discovery every 60 seconds, but **does not spend**,
+**Buying works over the Lightning lane.** The activity's *Buy access
+(Lightning)* button asks the gate for a quote, shows the BOLT11, then polls the
+same quote as *Check payment*; `access_granted: true` is the only success
+signal and a paid-but-not-granted answer is a retry, never a second invoice.
+Verified on an Android 14 emulator against a real `tollgate-module-basic-go`
+built from source: the module logged the gate `AUTH`, reported the session
+active, and the device screen showed **ACCESS GRANTED**. See
+[docs/android-lightning-buy.md](docs/android-lightning-buy.md) — including the
+limits: fakewallet mint, no real router, and the mint URL is still a hardcoded
+default.
+
+The token lane is unchanged. The foreground service polls discovery every 60
+seconds, but **does not spend**,
 even if a note was saved by an older build. Android 14 dataSync permission is
 required; a refused foreground start stops the service without starting a worker.
 There is no automatic-spend opt-in in this build: persistent budget accounting,

@@ -15,12 +15,12 @@ public final class Core {
     public static native String describe(String gateUrl);
 
     /**
-     * Spend one note at a gateway. Returns JSON: {"state":"granted",…} or
-     * {"error":…}. `attemptId` keys the journal, so the same attempt is refused
-     * rather than paid twice.
+     * Legacy ABI tombstone: always returns not-attempted with code
+     * payment-integration-unavailable. No argument is used; no IO or spending.
+     * This is also disabled in hardened feature builds.
      */
     public static native String buy(String gateUrl, String token, String attemptId, String journalPath);
 
-    /** Echo the caps as the core will apply them, so the UI shows the truth. */
+    /** Display-only caps; does not enroll policy or authorize payment. */
     public static native String capsFor(String unit, double maxPerMinute, double dailyBudget);
 }

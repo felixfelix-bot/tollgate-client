@@ -10,8 +10,6 @@ REPO=$(cd "$(dirname "$0")/../.." && pwd)
 ANDROID=${ANDROID_SDK_ROOT:-$HOME/android-sdk}
 BUILD_TOOLS=$(ls -d "$ANDROID"/build-tools/* | sort -V | tail -1)
 PLATFORM=$(ls -d "$ANDROID"/platforms/android-* | sort -V | tail -1)
-NDK=$(ls -d "$ANDROID"/ndk/* | sort -V | tail -1)
-TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 API=26
 
 # The box ships a JRE, not a JDK; prefer an explicit JAVA_HOME, then a local one.
@@ -21,17 +19,17 @@ fi
 [ -n "${JAVA_HOME:-}" ] && PATH=$JAVA_HOME/bin:$PATH
 command -v javac >/dev/null 2>&1 || { echo "no javac: set JAVA_HOME to a JDK 17+" >&2; exit 1; }
 
-OUT=$REPO/target/android
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$REPO/target}
+case "$CARGO_TARGET_DIR" in /*) ;; *) CARGO_TARGET_DIR=$REPO/$CARGO_TARGET_DIR ;; esac
+export CARGO_TARGET_DIR
+OUT=$CARGO_TARGET_DIR/android
 rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex" "$OUT/lib/arm64-v8a" "$OUT/lib/x86_64"
 
 echo "== 1/6 native libraries (same core, two ABIs)"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TC/aarch64-linux-android$API-clang
-export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$TC/x86_64-linux-android$API-clang
 cd "$REPO"
-cargo build --release --no-default-features --features android --target aarch64-linux-android
-cargo build --release --no-default-features --features android --target x86_64-linux-android
-cp target/aarch64-linux-android/release/libtollgate_client_core.so "$OUT/lib/arm64-v8a/"
-cp target/x86_64-linux-android/release/libtollgate_client_core.so "$OUT/lib/x86_64/"
+sh packaging/android/build-native.sh
+cp "$CARGO_TARGET_DIR/aarch64-linux-android/release/libtollgate_client_core.so" "$OUT/lib/arm64-v8a/"
+cp "$CARGO_TARGET_DIR/x86_64-linux-android/release/libtollgate_client_core.so" "$OUT/lib/x86_64/"
 
 echo "== 2/6 resources"
 "$BUILD_TOOLS/aapt2" compile --dir android/res -o "$OUT/res.zip"

@@ -1,0 +1,21 @@
+test_library_only_locked_build_and_single_target_directory (__main__.BuildContract.test_library_only_locked_build_and_single_target_directory) ... ERROR
+
+======================================================================
+ERROR: test_library_only_locked_build_and_single_target_directory (__main__.BuildContract.test_library_only_locked_build_and_single_target_directory)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/c08r4d0r/worktrees/tc-android-hardened-payment/tests/android_build_test.py", line 10, in test_library_only_locked_build_and_single_target_directory
+    script = (ROOT / 'packaging/android/build-native.sh').read_text()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/c08r4d0r/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/c08r4d0r/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/c08r4d0r/worktrees/tc-android-hardened-payment/packaging/android/build-native.sh'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+FAILED (errors=1)

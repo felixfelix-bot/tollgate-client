@@ -38,6 +38,7 @@ persistence = ["dep:rusqlite"]
 # Deliberate legacy test harness; never enable for production.
 nonproduction-test-harness = ["persistence"]
 cdk = ["dep:cdk", "dep:cdk-sqlite", "dep:tokio", "dep:serde", "dep:serde_json"]
-# The JNI shim the Android shell loads. Deliberately independent of `cdk`: the
-# phone can buy over the Lightning lane with no wallet on the device.
-android = ["dep:jni"]
+# Discovery JNI + fixed payment refusal, independent of C dependencies.
+android = ["dep:jni", "dep:serde", "dep:serde_json"]
+# Platform feasibility only, not permission to spend.
+android-hardened = ["android", "cdk", "persistence"]

@@ -1,3 +1,24 @@
+## Android hardened payment — first bounded milestone
+
+Branch `pr/android-hardened-payment`, based on live main `e49dcec27f48ed251b398d10d8d05bbb5a67eba9`.
+Stages 1–4 continuation authorized; no spending enabled. See
+`reports/android-hardened-payment/REPORT.md` for build/test evidence and remaining gates.
+
+Implemented: ABI-compatible legacy buy tombstone, real JVM/socket RED→GREEN,
+explicit android-hardened feature, locked NDK library builder and shared target-directory contract.
+Remaining: cross-family independent cold review, pushed-SHA CI, Android ABI load/TLS/entropy,
+actual app-UID storage, Network-bound sockets, production intent/enrollment/consent,
+and real UI/executable integration. The shipped Linux tollgate-agent still uses
+legacy run_once/run_recorded, NOT the hardened purchase_once controller.
+
+Final acceptance: phone AND computer seamlessly buy upstream internet from
+**tollgate-module-basic-go**, tested against real QEMU infrastructure under labgrid
+ownership/reservation. Verify actual Android UI/service and Linux executable call
+hardened controller; library/mocks/builds are insufficient. No FIPS/channels.
+Publish installable artifacts ONLY after verified production readiness. Existing
+APKs are discovery-only/unqualified for paid usage. No real funds without budget;
+autopay remains disabled. Keep one consolidated integration PR; do not merge this milestone.
+
 ## Capped-purchase review fixes (supersedes access claims below)
 
 All six findings addressed: no verdict reports purchase-attributed access; replay stays unresolved without bound provenance; authority/device/metric consistency and fixed metric vocabulary; atomic no-replace evidence publication; total connect/write/read deadlines and poll caps; recursive duplicate JSON and strict HTTP/EOF checks. Literal device-identifier mac is not an address. No server capabilities invented.

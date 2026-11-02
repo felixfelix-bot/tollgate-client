@@ -122,3 +122,58 @@ Re-verified with the field cleared (`pm clear`) and the app reinstalled: tapping
 *Buy access* → **Check payment** (quote obtained) → gate logged a new
 `AUTH 02:00:00:00:00:20` → **ACCESS GRANTED** on screen → `/session-state`
 `active`. No mint was configured at any point.
+
+## QEMU OpenWrt run (router-level)
+
+The module was also run **inside an OpenWrt 24.10.1 QEMU VM**, not just on the
+host. This is the first run where the gate opened on a real router OS.
+
+Rig: overlay on a stock `openwrt-base.qcow2`, 512 MB, two virtio NICs (slirp
+`n0` with hostfwd on 2121, `n1` as WAN), serial console over a unix socket.
+The module binary was served from the host on `:18777` and pulled by the guest;
+config at `/etc/tollgate/config.json`, recording `ndsctl` at `/opt/tg/bin`.
+
+Two things the guest had to get right, both of which are real deployment facts:
+
+- **The mint URL must be reachable from the router**, not from the machine you
+  are sitting at. `127.0.0.1:3338` inside the VM is the VM; the host mint is
+  `10.0.2.2:3338` across slirp. The first boot answered
+  `kind:21023 code=no-reachable-mints`, which was the module correctly refusing
+  to sell rather than failing later.
+- **Client identity comes from the lease file**, so the address the purchase
+  arrives from needs a lease. `/tmp/dhcp.leases` was seeded for `10.0.2.15`.
+
+Observed, in order:
+
+```
+$ wget -q -O - http://10.0.2.15:2121/
+{"kind":10021,...,"tags":[["metric","bytes"],["step_size","22020096"],
+ ["price_per_step","cashu","1","sat","http://10.0.2.2:3338/","1"]],...}
+
+$ wget -q -O - http://10.0.2.15:2121/whoami
+mac=02:00:00:00:00:99
+
+$ wget --post-data='{"amount":1,"mint_url":"http://10.0.2.2:3338/"}' \
+       http://10.0.2.15:2121/ln-invoice
+{"status":1,"quote":"01a19e82-...","invoice":"lnbc10n1p4wj9...",
+ "mint_url":"http://10.0.2.2:3338/","amount":1,"state":"UNPAID",
+ "access_granted":false}
+
+$ wget -q -O - 'http://10.0.2.15:2121/ln-invoice?quote=01a19e82-...'
+{"status":1,"quote":"01a19e82-...","state":"ISSUED","access_granted":true,
+ "allotment":22020096,"metric":"bytes"}
+
+$ cat /tmp/ndsctl.log
+2026-11-02T23:05:30Z AUTH 02:00:00:00:00:99
+
+$ wget -q -O - http://10.0.2.15:2121/session-state
+{"status":1,"mac":"02:00:00:00:00:99","state":"active"}
+```
+
+The guest also fetched the mint's `/v1/info` directly, confirming the
+quote→mint path crossed the VM boundary.
+
+**What this still does not prove:** `ndsctl` in this run is the repo's recording
+stub, so NoDogSplash and the nftables rules were not in the path. The gate call
+and the session state are real; the packet filtering behind them is not. A run
+with real `opennds` + `fw4` remains the outstanding item, as does a real mint.

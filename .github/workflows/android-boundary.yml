@@ -9,6 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # cdk 0.18.3 builds cdk-signatory protos; without protoc the hardened
+      # feature cannot even configure (verified on the first CI run).
+      - name: Install protoc (cdk build dependency)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

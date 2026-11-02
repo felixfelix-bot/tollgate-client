@@ -51,16 +51,47 @@ refusal, single watcher, destroy, repeated ticks/restart with a stored dummy not
 
 ### 4. Host suites
 
-`cargo test --locked --features android-hardened` was run. Result recorded in
-`host-full-tests.log`; see "Build/CI caveats" for what this run can and cannot
-claim.
+`umask 077`, `TMPDIR=/var/lib/tollgate-client-milestone-tests` (private ext4 dir,
+root-owned 755 ancestors), `cargo test --locked --features android-hardened`:
+24 test binaries, **180 passed / 0 failed**, including `capped_purchase`,
+`offline_policy`, `boundary_store`, `ledger_storage`. Log:
+`reports/android-hardened-payment/host-full-tests.log`. This is a host suite on
+Linux: it does not prove Android behaviour.
+
+### 5. Android native build (measured, partial)
+
+`TOLLGATE_ANDROID_FEATURE=android-hardened packaging/android/build-native.sh`
+(`--lib --locked`, NDK 26.1.10909125, API 26):
+
+- `aarch64-linux-android`: **built**. `libtollgate_client_core.so` is ELF 64-bit
+  ARM aarch64; `DT_NEEDED` is only `libdl.so`, `libc.so` (bundled SQLite, static
+  ring — no OpenSSL); exported JNI symbols are exactly `describe`, `buy`,
+  `capsFor` and zero `capped_purchase`/`send_validated` symbols, i.e. the hardened
+  controller is compiled in but not reachable from Java.
+  SHA256 `f92cfec305644ad4fc8f59cfc776be07fe8e4a656c601a8db13de6496b046ee8`.
+- `x86_64-linux-android`: at bank time the cargo run had passed the aarch64
+  target and was still compiling the second target's dependency graph on a
+  loaded host (`android-hardened-build.log`); the library was not yet emitted.
+  Remaining command, exact: `TOLLGATE_ANDROID_FEATURE=android-hardened
+  CARGO_BUILD_JOBS=4 sh packaging/android/build-native.sh` (then verify with
+  `llvm-nm -D --defined-only` for the three `Java_dev_tollgate_client_Core_*`
+  symbols and `llvm-readelf -d` for NEEDED entries).
+- A `--no-default-features` cross `cargo check` for both Android targets did not
+  complete before scope freeze (blocked on the same build-directory lock). Not a
+  red result — an unfinished one.
+
 
 ## Not verified — do not infer acceptance
 
 - **Cross-family independent cold review: NOT DONE.** Required before this
   milestone is accepted (the previous merge lacked it).
-- **CI on the pushed SHA: NOT DONE.** A workflow
-  (`.github/workflows/android-boundary.yml`) is added, but no run exists yet.
+- **CI on the pushed SHA: RED, with a real cause found.** Run 41528425939
+  (SHA `4fb1be8`) failed in `cargo test --locked --features android-hardened`
+  because `cdk-signatory 0.18.3`'s build script needs `protoc`, which the runner
+  does not have: `Could not find protoc ... apt-get install protobuf-compiler`.
+  That is a genuine build dependency of the hardened feature (present on this
+  box, hence the local build configured), not a test failure. The workflow now
+  installs `protobuf-compiler`; a green run on the new SHA is still owed.
 - **On-device gates: NOT MEASURED.** No `adb` device here: ABI load on arm64
   Android, TLS trust/entropy, real app-UID storage under
   `getNoBackupFilesDir()`, SQLite journal/WAL/SHM reopen on ext4/f2fs.

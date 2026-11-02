@@ -239,10 +239,26 @@ pub fn describe_gate(
     let decision = format!("{decision:?}")
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    // The mints the gate actually advertises, in advert order, de-duplicated.
+    // A shell must take the mint from here rather than carry its own default:
+    // the gate refuses a quote at a mint it does not accept, so a hardcoded
+    // default is a guaranteed refusal on any network but the lab one.
+    let mut mints: Vec<String> = Vec::new();
+    for o in &advert.offers {
+        if !o.mint_url.trim().is_empty() && !mints.iter().any(|m| m == &o.mint_url) {
+            mints.push(o.mint_url.clone());
+        }
+    }
+    let mints_json = mints
+        .iter()
+        .map(|m| format!("\"{}\"", m.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(",");
     Ok(format!(
-        r#"{{"gate":"{}","offers":[{}],"decision":"{}"}}"#,
+        r#"{{"gate":"{}","offers":[{}],"mints":[{}],"decision":"{}"}}"#,
         gate_url,
         offers.join(","),
+        mints_json,
         decision
     ))
 }

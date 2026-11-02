@@ -13,7 +13,9 @@ use crate::lightning;
 /// about to pay: `{"quote","invoice","amount","mint_url","expiry"}`.
 /// Failure is always `{"error":…}` — never a partial object, because a shell
 /// that has to guess which half arrived is how a client pays twice.
-pub fn request_invoice_json(result: Result<lightning::Invoice, lightning::LightningError>) -> String {
+pub fn request_invoice_json(
+    result: Result<lightning::Invoice, lightning::LightningError>,
+) -> String {
     match result {
         Ok(inv) => format!(
             r#"{{"quote":"{}","invoice":"{}","amount":{},"mint_url":"{}","expiry":{}}}"#,
@@ -33,7 +35,9 @@ pub fn request_invoice_json(result: Result<lightning::Invoice, lightning::Lightn
 /// only field a shell may treat as permission to say "you are online": a grant
 /// notice alone is not access, and the module's own `/session-state` is the
 /// authority this field mirrors.
-pub fn poll_invoice_json(result: Result<lightning::InvoiceStatus, lightning::LightningError>) -> String {
+pub fn poll_invoice_json(
+    result: Result<lightning::InvoiceStatus, lightning::LightningError>,
+) -> String {
     match result {
         Ok(st) => {
             let allotment = st
@@ -99,7 +103,10 @@ mod tests {
         assert!(json.contains(r#""quote":"q-1""#), "{json}");
         assert!(json.contains(r#""invoice":"lnbc1xyz""#), "{json}");
         assert!(json.contains(r#""amount":2"#), "{json}");
-        assert!(json.contains(r#""mint_url":"http://127.0.0.1:3338/""#), "{json}");
+        assert!(
+            json.contains(r#""mint_url":"http://127.0.0.1:3338/""#),
+            "{json}"
+        );
         assert!(json.contains(r#""expiry":1234"#), "{json}");
         assert!(!json.contains("error"), "{json}");
     }

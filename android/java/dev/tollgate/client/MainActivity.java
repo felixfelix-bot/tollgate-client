@@ -35,6 +35,8 @@ public class MainActivity extends Activity {
     /** The quote being paid, if any. Kept so "Check payment" polls the same quote. */
     private String pendingQuote;
     private String pendingGate;
+    /** Where the user may override the mint; blank means "ask the gateway". */
+    private android.widget.EditText mintField;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -91,8 +93,23 @@ public class MainActivity extends Activity {
             }
         });
 
+        mintField = new android.widget.EditText(this);
+        mintField.setHint("mint URL (blank = use the gateway's own)");
+        mintField.setText(prefs().getString("mint", ""));
+        Button saveMint = new Button(this);
+        saveMint.setText("Save mint");
+        saveMint.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs().edit().putString("mint", mintField.getText().toString().trim()).apply();
+                out.setText("mint saved; blank means use the gateway's own");
+            }
+        });
+
         root.addView(scan);
         root.addView(buy);
+        root.addView(mintField);
+        root.addView(saveMint);
         root.addView(token);
         root.addView(save);
         root.addView(service);
@@ -166,13 +183,34 @@ public class MainActivity extends Activity {
             return;
         }
         final String url = "http://" + gw + ":2121/";
-        final String mint = prefs().getString("mint", "http://127.0.0.1:3338/");
+        final String configured = prefs().getString("mint", "").trim();
         buy.setEnabled(false);
         out.setText("asking " + url + " for a quote …");
         io.execute(new Runnable() {
             @Override
             public void run() {
-                final String json = Core.requestInvoice(url, 1L, mint, 8000L);
+                // Ask the GATE which mints it accepts, then choose. The advert
+                // is the authority: a quote at a mint the gate does not accept
+                // is a guaranteed refusal, so this client never carries its own
+                // hardcoded mint default.
+                String mint = configured;
+                if (mint.isEmpty()) {
+                    String described = Core.describe(url);
+                    mint = firstMint(described);
+                }
+                if (mint == null || mint.isEmpty()) {
+                    final String msg = "no mint: set one, or the gateway advertises none";
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            buy.setEnabled(true);
+                            out.setText(msg);
+                        }
+                    });
+                    return;
+                }
+                final String chosen = mint;
+                final String json = Core.requestInvoice(url, 1L, chosen, 8000L);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
@@ -222,6 +260,26 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    /**
+     * The first mint URL in a {@code describe} answer, or null.
+     *
+     * {@code describe} emits {@code "mints":["https://…","…"]}. This reads the
+     * first entry only: the gate lists the mints it accepts in advert order and
+     * any of them is payable, so picking the first is a choice, not a guess
+     * about which is "right".
+     */
+    private static String firstMint(String describeJson) {
+        if (describeJson == null) return null;
+        int i = describeJson.indexOf("\"mints\":[");
+        if (i < 0) return null;
+        int start = describeJson.indexOf('"', i + 9);
+        if (start < 0) return null;
+        int end = describeJson.indexOf('"', start + 1);
+        if (end < 0) return null;
+        String m = describeJson.substring(start + 1, end);
+        return m.isEmpty() ? null : m;
     }
 
     /**

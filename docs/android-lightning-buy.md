@@ -92,10 +92,9 @@ a settled ecash issuance, not a mocked grant.
   `fakewallet` backend, which settles invoices for free. A production mint and a
   production Lightning payment are untested.
 - **No real phone.** Emulator only, x86_64.
-- **The mint URL is a hardcoded default** (`http://127.0.0.1:3338/`) with no UI
-  to change it. On a real network the phone will ask the gate for a quote at a
-  mint the gate does not accept, and the gate will refuse. **This must become a
-  setting before any real use.**
+- The mint now comes from **the gate's own advertisement** (`mint_choice`,
+  7 tests), with an optional user override that is honoured only if the gate
+  advertises it. Verified below with the field left blank.
 - **No `WifiNetworkSuggestion`.** The customer still joins the Wi-Fi themselves;
   Android forbids an ordinary app from doing it silently.
 - The APK is **debug-signed**.
@@ -103,3 +102,23 @@ a settled ecash issuance, not a mocked grant.
 Verdict: interoperable with tollgate-module-basic-go on the buy path, verified on
 emulator against a fakewallet mint. **Not production ready** — the mint setting
 and a real-router run are the remaining release gates.
+
+## Mint selection (added after the first run)
+
+The first build carried `http://127.0.0.1:3338/` as a hardcoded mint default,
+which meant the phone could only ever buy on the lab network. That is now gone:
+
+- `describe` reports `"mints":[…]` — every mint the gate advertises, in advert
+  order, de-duplicated.
+- `mint_choice::choose_mint(override, advertised)` decides: a non-empty override
+  wins **only if the gate advertises it** (asking a gate for a quote at a mint
+  it does not accept is a guaranteed refusal, so an unhonoured override is an
+  error, not a preference); with no override the first advertised mint is used;
+  no override and no advertised mint is an error, never a guess.
+- The activity has a **mint URL** field. Blank means "ask the gateway", which is
+  the intended default.
+
+Re-verified with the field cleared (`pm clear`) and the app reinstalled: tapping
+*Buy access* → **Check payment** (quote obtained) → gate logged a new
+`AUTH 02:00:00:00:00:20` → **ACCESS GRANTED** on screen → `/session-state`
+`active`. No mint was configured at any point.

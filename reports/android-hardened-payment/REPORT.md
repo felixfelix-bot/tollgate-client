@@ -91,13 +91,15 @@ Linux: it does not prove Android behaviour.
 
 - **Cross-family independent cold review: NOT DONE.** Required before this
   milestone is accepted (the previous merge lacked it).
-- **CI on the pushed SHA: RED, with a real cause found.** Run 41528425939
-  (SHA `4fb1be8`) failed in `cargo test --locked --features android-hardened`
-  because `cdk-signatory 0.18.3`'s build script needs `protoc`, which the runner
-  does not have: `Could not find protoc ... apt-get install protobuf-compiler`.
-  That is a genuine build dependency of the hardened feature (present on this
-  box, hence the local build configured), not a test failure. The workflow now
-  installs `protobuf-compiler`; a green run on the new SHA is still owed.
+- **CI on the pushed SHA: GREEN now; earlier run was RED for a real reason.** Run
+  41528425939 (`4fb1be8`) failed because `cdk-signatory 0.18.3`'s build script
+  needs `protoc`, absent on the runner: `Could not find protoc ... apt-get
+  install protobuf-compiler`. A real build dependency of the hardened feature
+  (present on this box, which is why local configuration succeeded), not a test
+  failure. The workflow now installs `protobuf-compiler`; runs for `d55db45` and
+  `b5dc34b` both completed `success` (host hardened suite, full-feature JVM
+  refusal, discovery JNI, service regression, build contract, `cargo fmt --check`).
+  This is Linux CI, not an Android device.
 - **On-device gates: NOT MEASURED.** No `adb` device here: ABI load on arm64
   Android, TLS trust/entropy, real app-UID storage under
   `getNoBackupFilesDir()`, SQLite journal/WAL/SHM reopen on ext4/f2fs.

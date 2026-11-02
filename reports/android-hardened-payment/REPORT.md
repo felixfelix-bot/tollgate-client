@@ -69,16 +69,20 @@ Linux: it does not prove Android behaviour.
   `capsFor` and zero `capped_purchase`/`send_validated` symbols, i.e. the hardened
   controller is compiled in but not reachable from Java.
   SHA256 `f92cfec305644ad4fc8f59cfc776be07fe8e4a656c601a8db13de6496b046ee8`.
-- `x86_64-linux-android`: at bank time the cargo run had passed the aarch64
-  target and was still compiling the second target's dependency graph on a
-  loaded host (`android-hardened-build.log`); the library was not yet emitted.
-  Remaining command, exact: `TOLLGATE_ANDROID_FEATURE=android-hardened
-  CARGO_BUILD_JOBS=4 sh packaging/android/build-native.sh` (then verify with
-  `llvm-nm -D --defined-only` for the three `Java_dev_tollgate_client_Core_*`
-  symbols and `llvm-readelf -d` for NEEDED entries).
-- A `--no-default-features` cross `cargo check` for both Android targets did not
-  complete before scope freeze (blocked on the same build-directory lock). Not a
-  red result — an unfinished one.
+- `x86_64-linux-android`: **built**. Final line of the run:
+  `Finished \`release\` profile [optimized] target(s) in 24m 19s`, zero `error`
+  lines in the log. `libtollgate_client_core.so` is ELF 64-bit x86-64,
+  2,651,944 bytes, SHA256
+  `0913417403aec75370833cd35ac4f721e4d5f3e2b6d0b1a31a5428efec90b4c9`.
+- Host-loading the aarch64 `.so` in a JVM is expected to fail (wrong machine) and
+  did; that is not a defect. The `android-hardened` tombstone was instead proven
+  by JVM/socket test against a host-built `android-hardened` debug `cdylib`
+  (`jni-green-android-hardened-debug.log`), and by the aarch64 `.so` symbol table.
+- The `--no-default-features` cross `cargo check` for both Android targets did
+  not complete before scope freeze (blocked behind the shared build-directory
+  lock). Not a red result — an unfinished one. Re-run:
+  `CARGO_TARGET_DIR=target-minimal cargo check --locked --lib
+  --no-default-features --target aarch64-linux-android` (and `x86_64`).
 
 
 ## Not verified — do not infer acceptance

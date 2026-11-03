@@ -184,8 +184,7 @@ Verified on an Android 14 emulator against a real `tollgate-module-basic-go`
 built from source: the module logged the gate `AUTH`, reported the session
 active, and the device screen showed **ACCESS GRANTED**. See
 [docs/android-lightning-buy.md](docs/android-lightning-buy.md) — including the
-limits: fakewallet mint, no real router, and the mint URL is still a hardcoded
-default.
+limits: fakewallet mint, and the packet-filtering path is still a stub.
 
 The token lane is unchanged. The foreground service polls discovery every 60
 seconds, but **does not spend**,

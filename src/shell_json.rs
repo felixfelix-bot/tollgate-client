@@ -65,9 +65,20 @@ pub fn poll_invoice_json(
     }
 }
 
+/// JSON for `Core.resolveMint(gateUrl, override, timeoutMs)`.
+///
+/// `{"mint":"<url>"} `or `{"error":"…"}`. The shell shows the returned mint
+/// before asking for a quote, so the user can see which one the gate accepted.
+pub fn resolve_mint_json(result: Result<String, String>) -> String {
+    match result {
+        Ok(mint) => format!(r#"{{"mint":"{}"}}"#, escape(&mint)),
+        Err(e) => format!(r#"{{"error":"{}"}}"#, escape(&e)),
+    }
+}
+
 /// A JSON string body must not be able to break the object it is embedded in.
 /// The gate's `error` text and a mint's quote id are both remote input.
-fn escape(s: &str) -> String {
+pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

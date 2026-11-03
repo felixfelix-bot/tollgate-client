@@ -33,6 +33,13 @@ public final class Core {
     public static native String requestInvoice(String gateUrl, long amountSat, String mintUrl, long timeoutMs);
 
     /**
+     * Ask the core which mint this purchase will use: the configured override if
+     * the gateway advertises it, otherwise the gateway's own first mint.
+     * Returns {@code {"mint":…}} or {@code {"error":…}}. Never guesses.
+     */
+    public static native String resolveMint(String gateUrl, String overrideUrl, long timeoutMs);
+
+    /**
      * Poll a quote for access. {@code {"state","access_granted","allotment","metric"}}.
      * {@code access_granted:true} is the only success signal; a
      * {@code paid-but-not-granted} answer means retry, never pay again.

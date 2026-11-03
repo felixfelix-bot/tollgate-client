@@ -245,13 +245,21 @@ pub fn describe_gate(
     // default is a guaranteed refusal on any network but the lab one.
     let mut mints: Vec<String> = Vec::new();
     for o in &advert.offers {
-        if !o.mint_url.trim().is_empty() && !mints.iter().any(|m| m == &o.mint_url) {
-            mints.push(o.mint_url.clone());
+        let candidate = o.mint_url.trim();
+        if !candidate.is_empty()
+            && !mints
+                .iter()
+                .any(|m| crate::mint_choice::same_mint(m, candidate))
+        {
+            // Trimmed and de-duplicated by mint *identity*, so `https://m/` and
+            // `https://m/ ` cannot both appear and the first entry a shell picks
+            // is never a stray-space spelling.
+            mints.push(candidate.to_string());
         }
     }
     let mints_json = mints
         .iter()
-        .map(|m| format!("\"{}\"", m.replace('\\', "\\\\").replace('"', "\\\"")))
+        .map(|m| format!("\"{}\"", crate::shell_json::escape(m)))
         .collect::<Vec<_>>()
         .join(",");
     Ok(format!(
@@ -261,6 +269,43 @@ pub fn describe_gate(
         mints_json,
         decision
     ))
+}
+
+/// The mints a gate's advert names, trimmed and de-duplicated by mint identity.
+///
+/// Fetches the advert itself rather than trusting a shell to have parsed it:
+/// the shell used to scrape `describe`'s JSON by hand, which is how an empty
+/// array came to be read as the literal string "decision".
+pub fn advertised_mints(gate_url: &str, timeout_ms: u64) -> Result<Vec<String>, String> {
+    let (status, body) = http::request("GET", gate_url, None, timeout_ms)?;
+    if status != 200 {
+        return Err(format!("{gate_url} answered HTTP {status}"));
+    }
+    let kind = body
+        .split("\"kind\":")
+        .nth(1)
+        .and_then(|r| {
+            r.trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .ok()
+        })
+        .ok_or_else(|| "advert body has no numeric kind".to_string())?;
+    let advert = parse_advertisement(kind, &extract_tags(&body)).map_err(|e| e.to_string())?;
+    let mut mints: Vec<String> = Vec::new();
+    for o in &advert.offers {
+        let candidate = o.mint_url.trim();
+        if !candidate.is_empty()
+            && !mints
+                .iter()
+                .any(|m| crate::mint_choice::same_mint(m, candidate))
+        {
+            mints.push(candidate.to_string());
+        }
+    }
+    Ok(mints)
 }
 
 /// Probe, decide, buy — and write down what happened.
@@ -326,7 +371,7 @@ pub fn run_recorded(
 
 /// Pull `["name","v","v"]` arrays out of an event body. The core parser wants
 /// tags as `Vec<Vec<String>>`; this is the one place that knows JSON shape.
-fn extract_tags(body: &str) -> Vec<Vec<String>> {
+pub(crate) fn extract_tags(body: &str) -> Vec<Vec<String>> {
     let mut tags = Vec::new();
     let Some(start) = body.find("\"tags\"") else {
         return tags;

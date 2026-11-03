@@ -1,0 +1,362 @@
+   Compiling tollgate-client-core v0.1.0 (/home/c08r4d0r/worktrees/t_be8d64b8)
+warning: unused imports: `Arc` and `Mutex`
+  --> tests/history_wiring.rs:10:17
+   |
+10 | use std::sync::{Arc, Mutex};
+   |                 ^^^  ^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tollgate-client-core` (test "history_wiring") generated 1 warning (run `cargo fix --test "history_wiring" -p tollgate-client-core` to apply 1 suggestion)
+warning: field `handle` is never read
+  --> tests/network_seam.rs:47:5
+   |
+46 | struct FakeBinder {
+   |        ---------- field in this struct
+47 |     handle: u64,
+   |     ^^^^^^
+   |
+   = note: `FakeBinder` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tollgate-client-core` (test "network_seam") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.97s
+     Running unittests src/lib.rs (target/debug/deps/tollgate_client_core-3ef6cd346733756f)
+
+running 52 tests
+test capped_purchase::tests::a_complete_non_2xx_answer_is_malformed_even_with_a_grant_body ... ok
+test capped_purchase::tests::ambiguity_is_unknown_and_a_pre_send_refusal_is_unknown_but_flagged ... ok
+test capped_purchase::tests::safety_session_metric_and_device_are_validated ... ok
+test capped_purchase::tests::no_verdict_reports_access ... ok
+test capped_purchase::wire_tests::poll_constructor_has_operational_caps ... ok
+test capped_purchase::wire_tests::duplicate_json_members_are_rejected ... ok
+test capped_purchase::tests::session_phase_never_guesses ... ok
+test capped_purchase::wire_tests::public_zero_poll_policy_is_normalized ... ok
+test capped_purchase::tests::an_evidence_sink_refuses_a_non_private_directory ... ok
+test capped_purchase::wire_tests::production_three_element_device_identifier_is_a_grant ... ok
+test capped_purchase::tests::a_grant_notice_requires_both_tags_and_kind_1022 ... ok
+test capped_purchase::wire_tests::three_element_tag_with_unknown_key_is_still_tolerated ... ok
+test capped_purchase::wire_tests::strict_http_status_and_headers ... ok
+test capped_purchase::wire_tests::two_element_device_identifier_still_works ... ok
+test capped_purchase::wire_tests::zero_total_budget_never_connects ... ok
+test history::tests::an_identifier_with_a_quote_survives_a_round_trip ... ok
+test history::tests::a_truncated_final_line_is_skipped_and_counted ... ok
+test history::tests::events_round_trip_through_jsonl ... ok
+test json::tests::a_string_number_is_accepted_where_a_number_is_expected ... ok
+test json::tests::reads_the_gate_response_shapes ... ok
+test history::tests::persist_and_reload_matches_the_live_value ... ok
+test netcfg::tests::a_route_without_via_is_not_a_gateway ... ok
+test netcfg::tests::an_address_becomes_the_portal_url ... ok
+test netcfg::tests::finds_the_v4_default_route ... ok
+test runner::tests::extracts_tag_arrays_from_an_event_body ... ok
+test token_vault::tests::accepts_empty_bytes_and_distinguishes_different_content ... ok
+test mint_identity::tests::contract ... ok
+test token_vault::tests::exact_bytes_survive_restart_and_duplicate_store_is_immutable ... ok
+test token_vault::tests::open_descriptor_does_not_follow_replaced_directory ... ok
+test token_vault::tests::permissions_changed_after_open_fail_closed ... ok
+test token_vault::tests::rejects_unsafe_directory_paths_and_modes ... ok
+test token_vault::tests::rejects_symlink_file_and_hardlink ... ok
+test token_vault::tests::restart_rejects_missing_corrupt_and_permissive_files ... ok
+test capped_purchase::wire_tests::reopened_evidence_never_replaces_records ... ok
+test validated_token::tests::duplicates_rejected_even_if_amount_and_signature_differ ... ok
+test validated_token::tests::amount_overflow_and_missing_denomination_rejected ... ok
+test validated_token::tests::encoding_order_and_overlap_use_y ... ok
+test validated_token::tests::fee_unknown_fails_closed_and_total_is_checked ... ok
+test validated_token::tests::metadata_must_match_unit_and_cryptographic_keyset_id ... ok
+test offline_policy::tests::enrollment_is_immutable_and_missing_policy_fails_closed ... ok
+test validated_token::tests::typed_adapter_stores_exact_bytes_and_uses_face_not_requested_amount ... ok
+test validated_token::tests::mint_alias_unmodified_plans_send_only_once ... ok
+test capped_purchase::wire_tests::delayed_trailing_bytes_are_rejected ... ok
+test validated_token::tests::unknown_keyset_and_invalid_encoding_rejected ... ok
+test validated_token::tests::wrong_mint_unit_and_multiple_mints_rejected ... ok
+test budget_store::terminal_boundary::release_waiting_for_send_transaction ... ok
+test budget_store::terminal_boundary::settle_waiting_for_send_transaction ... ok
+test capped_purchase::wire_tests::stalled_write_respects_total_deadline ... ok
+test validated_token::tests::verified_transport_panic_is_quarantined_on_restart ... ok
+test validated_token::tests::opaque_boundary_rejects_mutable_claims_and_substitution ... ok
+test validated_token::tests::verified_send_faults_replays_aliases_and_full_debit ... ok
+test validated_token::tests::mint_identity_matrix_typed_plans_and_restart ... ok
+
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running unittests src/bin/offline-policy-sim.rs (target/debug/deps/offline_policy_sim-60d74d3abe0a5859)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/tollgate-agent.rs (target/debug/deps/tollgate_agent-dcc774fb415c6dd0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/agent.rs (target/debug/deps/agent-7fb5b27e07787624)
+
+running 7 tests
+test a_definitive_refusal_is_not_reconciled ... ok
+test a_grant_is_recorded_with_its_cost ... ok
+test a_duplicate_attempt_is_never_reposted ... ok
+test a_failed_mint_spends_nothing ... ok
+test a_timeout_reconciles_against_the_mint_and_books_a_spent_note ... ok
+test a_timeout_with_an_unspent_note_is_retryable_but_not_auto_retried ... ok
+test no_token_is_minted_when_a_cap_blocks_the_purchase ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bound_transport.rs (target/debug/deps/bound_transport-e811d08793075d72)
+
+running 19 tests
+test address_family_mismatch_is_refused_before_send ... ok
+test exact_bytes_are_written_once_and_a_200_is_complete ... ok
+test chunk_size_overflow_is_oversized_not_a_panic ... ok
+test a_peer_that_vanishes_mid_write_is_ambiguous_and_not_retried ... ok
+test missing_interface_fails_closed_before_send ... ok
+test a_302_is_ambiguous_and_the_location_listener_receives_nothing ... ok
+test ipv6_loopback_binding_works ... ok
+test oversized_response_is_ambiguous ... ok
+test target_and_context_validation ... ok
+test one_transport_instance_is_immutable_across_sends ... ok
+test all_redirect_codes_are_ambiguous ... ok
+test truncated_response_is_ambiguous_and_not_retried ... ok
+test valid_chunked_response_is_complete ... ok
+test wrong_source_address_is_refused_before_send ... ok
+test malformed_chunked_responses_are_ambiguous ... ok
+test non_2xx_is_ambiguous_not_a_refusal ... ok
+test connect_timeout_is_refused_before_send ... ok
+test ambiguous_framing_is_refused_as_ambiguous ... ok
+test read_timeout_is_ambiguous ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.75s
+
+     Running tests/budget_crash.rs (target/debug/deps/budget_crash-2377bf4f3795af35)
+
+running 7 tests
+test crash_worker ... ok
+test competing_open_process_cannot_over_admit_after_holder_killed ... ok
+test uncommitted_spilled_sqlite_transaction_rolls_back_after_kill ... ok
+test kill_before_and_after_committed_reservation ... ok
+test kill_before_and_after_committed_settlement_replay_no_double_debit ... ok
+test interrupted_real_initialization_fails_closed_without_reenrollment ... ok
+test kill_inside_real_reserve_and_settle_before_commit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/budget_store.rs (target/debug/deps/budget_store-7b5bef74adb14968)
+
+running 8 tests
+test process_reservation_worker ... ok
+test unreadable_permissions_fail_closed ... ok
+
+running 1 test
+
+running 1 test
+test corrupt_missing_unreadable_and_unknown_schema ... ok
+test process_reservation_worker ... ok
+test overflow_and_conflicting_operations_fail_closed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.01s
+
+test durable_full_face_plus_fee_and_idempotency ... ok
+test process_reservation_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.01s
+
+test all_prior_day_exposure_and_units ... ok
+test two_processes_compete_for_last_budget ... ok
+test altered_schema_and_logical_corruption_are_rejected ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/capped_purchase.rs (target/debug/deps/capped_purchase-9cafc5ca3f09d7e4)
+
+running 21 tests
+test ambiguous_and_pre_send_refusals_both_report_unknown ... ok
+test complete_but_not_a_usable_grant_is_a_refusal_or_malformed ... ok
+test genuine_refusals_still_classify_as_refusals ... ok
+test complete_kind_1022_with_allotment_and_metric_is_a_grant_notice ... ok
+test a_redirect_on_the_session_reader_stops_the_purchase_before_any_send ... ok
+test a_wrong_network_selection_sends_zero_posts_and_owns_no_exposure ... ok
+test an_already_active_session_refuses_with_zero_posts ... ok
+test literal_mac_notice_is_a_type_not_a_device_address ... ok
+test safety_reflected_metric_is_not_recorded ... ok
+test an_unrecognised_baseline_state_blocks_the_purchase ... ok
+test grant_plus_observed_active_session_is_unattributed ... ok
+test an_ambiguous_answer_keeps_exposure_and_replay_is_status_only ... ok
+test unrecognised_metric_unit_is_unknown_not_refused ... ok
+test unsupported_metric_keeps_a_distinguishable_reason ... ok
+test grant_without_an_active_session_is_not_access_and_never_resends ... ok
+test the_session_reader_is_bound_to_the_numeric_target_and_interface ... ok
+test separate_payment_and_session_authorities_are_refused ... ok
+test safety_reported_active_is_never_purchase_attributed_and_replay_stays_historical ... ok
+test safety_unrelated_endpoint_is_rejected_before_network ... ok
+test mismatched_device_or_metric_never_combines_grant_with_active ... ok
+test a_non_2xx_or_unframed_session_answer_is_a_typed_error_not_a_guess ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+
+     Running tests/cli_recording.rs (target/debug/deps/cli_recording-f605b867d25019f3)
+
+running 7 tests
+test dry_run_and_existing_real_directory_cannot_enroll ... ok
+test strict_options_and_no_legacy_override ... ok
+test duplicate_and_unknown_policy_fields_fail_before_enrollment ... ok
+test policy_freshness_and_isolation ... ok
+test copied_pair_and_changed_matching_policy_are_not_new_authority ... ok
+test restart_proof_dedup_and_budget ... ok
+test swapped_ledger_or_policy_and_partial_enrollment_fail_closed ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/cli_recording_features.rs (target/debug/deps/cli_recording_features-7f33bd15c13a79d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/daemon_e2e.rs (target/debug/deps/daemon_e2e-b5dcdf4d3a696894)
+
+running 4 tests
+test an_offer_over_the_cap_costs_a_probe_and_nothing_else ... ok
+test a_second_run_with_the_same_attempt_does_not_touch_the_gate_again ... ok
+test a_definitive_refusal_is_journalled_and_not_retried ... ok
+test probes_decides_buys_and_journals_over_a_real_socket ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/discovery.rs (target/debug/deps/discovery-bc5b3dab59e3ead2)
+
+running 9 tests
+test an_advert_with_no_payable_offer_is_valid_and_empty ... ok
+test missing_min_steps_defaults_to_one_and_sats_is_normalised ... ok
+test rejects_a_foreign_event_kind ... ok
+test drops_offers_that_are_not_cashu ... ok
+test deduplicates_identical_offers ... ok
+test drops_unpayable_offers ... ok
+test rejects_an_unknown_metric ... ok
+test rejects_an_advert_without_a_usable_step_size ... ok
+test parses_the_module_own_advert ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/history_wiring.rs (target/debug/deps/history_wiring-eeef55229805f9b4)
+
+running 3 tests
+test an_unreachable_gate_is_recorded_as_a_failure_not_dropped ... ok
+test a_refused_purchase_counts_against_the_gate ... ok
+test a_purchase_writes_a_probe_sample_and_a_grant ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ledger_storage.rs (target/debug/deps/ledger_storage-76870c1ec6be7f22)
+
+running 7 tests
+test existing_recovery_file_blocks_enrollment_and_is_preserved ... ok
+test enrollment_refuses_auxiliary_before_creating_database ... ok
+test rejects_unsafe_parent_before_creation_and_open ... ok
+test sqlite_nofollow_rejects_main_and_ancestor_symlinks ... ok
+test parent_replacement_race_under_untrusted_ancestor_is_refused ... ok
+test refuses_symlink_ledger_and_auxiliaries_without_touching_target ... ok
+test refuses_hardlinks_modes_and_nonregular_paths ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/lightning_e2e.rs (target/debug/deps/lightning_e2e-06b4a897d82a7a9e)
+
+running 4 tests
+test a_full_quote_table_is_a_refusal_with_its_retry_hint ... ok
+test exhausting_the_polls_says_paid_but_not_granted_rather_than_failing_the_payment ... ok
+test a_grant_failure_keeps_polling_and_never_pays_twice ... ok
+test requests_pays_and_polls_until_the_gate_opens ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/network_seam.rs (target/debug/deps/network_seam-15c26303e1b19f70)
+
+running 10 tests
+test the_android_entry_point_carries_a_handle_and_its_link ... ok
+test a_network_lost_after_the_write_is_ambiguous ... ok
+test no_injected_android_network_refuses_every_path ... ok
+test a_network_lost_before_the_write_boundary_refuses_the_post ... ok
+test the_android_binder_refuses_unspecified_and_fails_closed_on_host ... ok
+test a_refused_network_bind_sends_nothing_on_any_path ... ok
+test the_linux_default_selection_still_binds_the_device ... ok
+test a_network_lost_before_the_read_is_typed_not_an_empty_session ... ok
+test the_advert_get_path_prices_the_body_and_refuses_without_a_network ... ok
+test the_same_seam_carries_advert_get_session_get_post_and_probe ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/offline_policy_process.rs (target/debug/deps/offline_policy_process-c59816ef29355d18)
+
+running 6 tests
+test unenrolled_unit_rejected ... ok
+test restart_retains_cap_and_counts_face_plus_fee_not_advert ... ok
+test wrong_snapshot_hash_and_staleness_fail_closed ... ok
+test corrupt_vault_has_zero_callbacks ... ok
+test changed_fee_or_cap_rejected_before_first_send ... ok
+test overlapping_alias_and_encoding_never_get_second_callback ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/purchase.rs (target/debug/deps/purchase-31e0573f7eeb6e93)
+
+running 9 tests
+test a_200_carrying_a_notice_event_is_not_a_grant ... ok
+test a_200_with_a_session_event_is_a_grant ... ok
+test a_200_with_an_unparseable_body_is_ambiguous ... ok
+test a_400_with_a_notice_event_is_a_definitive_refusal ... ok
+test a_400_with_an_unparseable_body_is_ambiguous ... ok
+test a_500_is_ambiguous_not_a_refusal ... ok
+test states_move_forward_only ... ok
+test the_intent_key_is_stable_and_does_not_contain_the_token ... ok
+test ambiguous_reconciles_to_spent_or_unspent ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/refusal_codes.rs (target/debug/deps/refusal_codes-bca83abd3f87c022)
+
+running 7 tests
+test a_grant_carries_the_device_identifier ... ok
+test an_unknown_code_is_ambiguous_not_a_refusal ... ok
+test may_be_spent_codes_are_ambiguous ... ok
+test spent_and_retired_keyset_are_value_lost ... ok
+test the_startup_gate_503_is_retryable ... ok
+test not_taken_codes_are_definitive_refusals ... ok
+test untouched_codes_are_retryable ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/scoring.rs (target/debug/deps/scoring-e9a1356d22953d7c)
+
+running 8 tests
+test cost_per_minute_from_step_math ... ok
+test offers_in_another_unit_are_not_comparable ... ok
+test cheaper_wins_at_equal_quality ... ok
+test a_price_above_the_per_minute_cap_is_never_bought ... ok
+test hysteresis_keeps_a_good_incumbent ... ok
+test the_daily_budget_is_a_hard_stop ... ok
+test respects_the_advertised_minimum_purchase ... ok
+test reliability_beats_a_marginal_price_advantage ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/send_state.rs (target/debug/deps/send_state-5f2e365970f643ef)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/send_terminal_race.rs (target/debug/deps/send_terminal_race-6a5be5348e516d61)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tollgate_client_core
+
+running 1 test
+test src/send_state.rs - send_state::BudgetStore (line 73) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+

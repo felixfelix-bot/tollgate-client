@@ -206,3 +206,19 @@ Limits: structural validation is NOT issuer/DLEQ authentication, spend-state kno
   default and Android feature configurations.
 - Remaining: exact-build device test, persistent spend ledger, token identity and
   reconciliation, structured JNI JSON, safe funding UX. No production-readiness claim.
+
+## Android network-binding seam (milestone 2, part A)
+
+- Added `src/net_bind.rs`: one injectable seam (`NetworkBinder`, `NetworkSelection`,
+  `BoundSocket`, `BoundGet`, `connect_bound`) that every gate socket now goes through —
+  advert `GET`, session-state `GET`, payment `POST` and the post-grant probe.
+- Android path calls `android_setsocknetwork(Network.getNetworkHandle(), fd)`; Linux keeps
+  `SO_BINDTODEVICE` byte-for-byte and is regression-tested.
+- Fail-closed rules are structural: no process-wide bind, no unbound fallback, no retry or
+  redirect. A lost network refuses before the write and is ambiguous after it.
+- `tests/network_seam.rs` (10 tests) asserts on what the loopback server observed, not on
+  client return values: 4 connections for 4 paths on one seam, and 0 connections / 0 POST
+  bodies on every refusal.
+- Full host suite green: 191 tests across 25 binaries, `--features android-hardened`.
+- Unproven and stated as such: the platform call on a device, the Java `Network` capture
+  (follow-up card), and any real payment. No device or funds involved.

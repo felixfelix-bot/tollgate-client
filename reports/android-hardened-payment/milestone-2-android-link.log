@@ -1,0 +1,46 @@
+Android link evidence for the seam (host, no device).
+
+Toolchain: NDK 26.1.10909125, target aarch64-linux-android, API 26,
+CC/CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = aarch64-linux-android26-clang.
+
+1) The crate itself builds for Android with the seam compiled in:
+
+   $ cargo build --locked --lib --no-default-features \
+         --features android-hardened --target aarch64-linux-android
+       Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 03s
+
+2) The released .so carries no reference to android_setsocknetwork yet, and that
+   is expected at this milestone:
+
+   $ llvm-readelf -d libtollgate_client_core.so | grep NEEDED
+     NEEDED  libdl.so
+     NEEDED  libc.so
+   $ llvm-readelf --dyn-syms libtollgate_client_core.so | grep setsocknetwork
+     (no match)
+
+   Reason: nothing on the cdylib's exported surface reaches AndroidNetworkBinder
+   yet -- the Java-side Network capture is the follow-up card -- so rustc drops
+   the extern block as unreachable and never emits -landroid. Forcing the
+   reference with -C link-arg=-Wl,--undefined=android_setsocknetwork also does not
+   change DT_NEEDED, because the reference is optimised out before the linker
+   sees it.
+
+3) So the attribute and the sysroot were proved with a throwaway probe crate that
+   references the symbol from main:
+
+   $ cargo build --target aarch64-linux-android       # probe crate
+       Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+   $ llvm-readelf -d target/aarch64-linux-android/debug/android-link-probe \
+         | grep NEEDED
+     NEEDED  libandroid.so
+     NEEDED  libdl.so
+     NEEDED  libc.so
+   $ llvm-readelf --dyn-syms ... | grep setsocknetwork
+     4: 0000000000000000 0 FUNC GLOBAL DEFAULT UND android_setsocknetwork
+
+   => `#[link(name = "android")]` resolves against the NDK sysroot and lands
+      libandroid.so in DT_NEEDED. The follow-up card only has to make the symbol
+      reachable from the exported shell surface.
+
+What this does NOT prove: that android_setsocknetwork attaches a socket to a real
+Network on a device. That needs a device run with ConnectivityManager in hand.

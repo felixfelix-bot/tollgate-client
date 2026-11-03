@@ -1,0 +1,23 @@
+RED evidence for the second wave of seam tests (recorded before the production
+wiring existed, by stashing src/ changes and leaving tests/ in place).
+
+--- cargo test --features android-hardened --test capped_purchase a_wrong_network_selection
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error: could not compile `tollgate-client-core` (test "capped_purchase") due to 6 previous errors
+
+--- cargo test --features android-hardened --test network_seam the_android
+error[E0432]: unresolved import `tollgate_client_core::net_bind`
+error[E0432]: unresolved import `tollgate_client_core::net_bind`
+error[E0432]: unresolved import `tollgate_client_core::net_bind`
+error[E0433]: cannot find `net_bind` in `tollgate_client_core`
+error[E0425]: cannot find function `describe_gate_bound` in module `tollgate_client_core::runner`
+error[E0425]: cannot find function `describe_gate_bound` in module `tollgate_client_core::runner`
+error: could not compile `tollgate-client-core` (test "network_seam") due to 6 previous errors
+
+The first wave's RED (tests/network_seam.rs against an untouched tree) is
+milestone-2-seam-red.log: `unresolved import tollgate_client_core::net_bind`.

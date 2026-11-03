@@ -182,3 +182,92 @@ reservation required). Installable artifacts are published only after verified
 production readiness; the existing discovery-only APK
 (`65c322d5…a0277`) remains unqualified for paid usage. No FIPS, no channels, no
 real funds without an authorized budget.
+
+---
+
+# Milestone 2, part A — the injectable network-binding seam
+
+Branch `pr/android-network-seam`, based on `4499b49` (live main after PR #3).
+Worktree `/home/c08r4d0r/worktrees/t_be8d64b8`. Nothing merged; no funds, no mint, no
+router/QEMU/lab mutation, no FIPS edits, autopay still absent.
+
+## The bug this closes
+
+`BoundVerifiedBytesTransport` and `SessionReader` each built their own socket and called
+`SO_BINDTODEVICE`. That is a Linux privilege model: a normal Android app cannot rely on
+it. The shell selected a `Network`, dropped the object, and the kernel was then free to
+route the payment POST over cellular while the phone sat on captive Wi-Fi — with the
+advert `GET` and the session `GET` free to leave from yet another network. Four request
+paths, four independent decisions about where the bytes went.
+
+## The fix
+
+`src/net_bind.rs` is now the only place a gate socket is created or attached.
+
+| Path | Before | Now |
+| --- | --- | --- |
+| advert `GET` | `http::request`, unbound | `describe_gate_bound` → `BoundGet` |
+| session-state `GET` | own `SO_BINDTODEVICE` socket | `SessionReader` → `connect_bound` |
+| payment `POST` | own `SO_BINDTODEVICE` socket | `BoundVerifiedBytesTransport` → `connect_bound` |
+| post-grant probe | session reader again | same `SessionReader` |
+
+`connect_bound` does create → attach → source-bind → connect → verify local **and** peer
+endpoints, with the same `Limits` (connect/read/write/total, header/body caps) as before.
+`NetworkSelection` carries the caller's `NetworkContext` plus a `dyn NetworkBinder`, and
+`PurchaseRequest::selection: Option<NetworkSelection>` is the single injection point:
+`None` means the platform default (Linux `DeviceBinder`, Android `NoNetwork`).
+
+## Fail-closed properties, and how each is proved
+
+Evidence is the **server's** observation from a loopback listener in
+`tests/network_seam.rs`; a client return value alone is never treated as proof.
+
+| Property | Test | Observed |
+| --- | --- | --- |
+| one seam, four paths | `the_same_seam_carries_advert_get_session_get_post_and_probe` | 4 connections; methods `GET /`, `GET /session-state`, `POST /`, `GET /session-state`; injected binder saw all 4 |
+| wrong network ⇒ nothing sent | `a_refused_network_bind_sends_nothing_on_any_path` | 0 connections, 0 POST bodies, typed refusal on each path |
+| wrong network at the controller | `a_wrong_network_selection_sends_zero_posts_and_owns_no_exposure` (`tests/capped_purchase.rs`) | 0 connections, 0 POSTs, `Unresolved`, ledger owns no exposure |
+| loss before the write refuses | `a_network_lost_before_the_write_boundary_refuses_the_post` | connection made, **0 POST bodies**, `RefusedBeforeSend` |
+| loss after the write is ambiguous | `a_network_lost_after_the_write_is_ambiguous` | 1 POST body at the gate, `Ambiguous`, `may_have_been_sent()` |
+| a lost link is not an empty session | `a_network_lost_before_the_read_is_typed_not_an_empty_session` | before the write: 0 bytes; after: `NetworkLost`, never `Inactive` |
+| advert path prices over the seam | `the_advert_get_path_prices_the_body_and_refuses_without_a_network` | priced from the fetched body; 0 connections when the binder refuses |
+| Android default refuses everything | `no_injected_android_network_refuses_every_path` | advert GET + session GET + POST all refuse, 0 connections |
+| unspecified handle rejected | `the_android_binder_refuses_unspecified_and_fails_closed_on_host` | `handle == 0` rejected; on host the binder fails closed |
+| Linux behaviour unchanged | `the_linux_default_selection_still_binds_the_device` | still binds `lo`, still fails closed on a missing interface |
+
+## Gates
+
+- **Gate 1 (RED).** `reports/android-hardened-payment/milestone-2-seam-red.log`:
+  `unresolved import tollgate_client_core::net_bind`.
+  `milestone-2-red.log` covers the second wave (production wiring stashed, tests kept):
+  `cannot find net_bind`, `cannot find describe_gate_bound`.
+- **Gate 2 (GREEN).** `cargo test --locked --features android-hardened` under
+  `umask 077; TMPDIR=/var/tmp/tollgate-private-be8d64b8` (private root, not `$HOME`):
+  **191 passed, 0 failed, 0 ignored** across 25 test binaries
+  (`milestone-2-tests.log`). `tests/network_seam.rs`: 10/10.
+- **Gate 3 (docs).** `docs/network-binding-seam.md` + updated module docs in
+  `src/net_bind.rs`, `src/bound_transport.rs`, `src/capped_purchase.rs`; this section.
+- **Gate 4 (commits).** One concern per commit, conventional messages, clean tree.
+- **Gate 5 (push).** Branch pushed to `origin`, head SHA in the handoff. No merge, no PR.
+
+## What is still unproven — plainly
+
+1. **The platform call on a device.** `android_setsocknetwork` is proven to *link*
+   (`milestone-2-android-link.log`: `libandroid.so` in `DT_NEEDED`,
+   `UND android_setsocknetwork`), and the host build is proven to fail closed because the
+   symbol is absent. Whether a real `Network.getNetworkHandle()` attaches a socket to
+   captive Wi-Fi while cellular is the default is **device evidence**, and no loopback
+   listener can stand in for it.
+2. **The Java side does not exist yet.** No `ConnectivityManager` callback, no handle
+   plumbing, no `onLost → NetworkLink::mark_lost`. Until the follow-up card lands,
+   `NetworkSelection::default_for` on Android is `NoNetwork`, so the Android build refuses
+   every request rather than leaving one unbound. That is deliberate — the old behaviour is
+   the bug.
+3. **The released `.so` does not reference the symbol.** Nothing in the cdylib's exported
+   surface reaches the binder yet, so rustc drops the extern block and no `-landroid` is
+   emitted. The link proof therefore uses a throwaway probe crate; the follow-up card only
+   has to make the code reachable.
+4. **Response-path attribution.** The seam rechecks the selection around the write, but
+   "the response arrived over the bound network" is still an inference from a verified
+   `peer_addr`/`local_addr` pair plus pre/post link checks, not a per-packet measurement.
+5. **Real payment.** No router, mint, QEMU or funds appear in any test here.

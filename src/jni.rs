@@ -200,3 +200,25 @@ pub extern "system" fn Java_dev_tollgate_client_Core_pollInvoice(
     let result = crate::lightning::poll_status(&url, &quote, timeout);
     give(&mut env, crate::shell_json::poll_invoice_json(result))
 }
+
+/// `Core.resolveMint(gateUrl, override, timeoutMs)` — which mint this purchase
+/// will use.
+///
+/// The gate's advert is fetched here in Rust and matched against the override
+/// with `mint_choice::choose_mint`, so the rule that is tested is the rule that
+/// runs. Returns `{"mint":…}` or `{"error":…}`; the shell must not guess.
+#[no_mangle]
+pub extern "system" fn Java_dev_tollgate_client_Core_resolveMint(
+    mut env: JNIEnv,
+    _class: JClass,
+    gate_url: JString,
+    override_url: JString,
+    timeout_ms: jlong,
+) -> jstring {
+    let url = take(&mut env, &gate_url);
+    let want = take(&mut env, &override_url);
+    let timeout = timeout_ms.max(1000) as u64;
+    let result = crate::runner::advertised_mints(&url, timeout)
+        .and_then(|advertised| crate::mint_choice::choose_mint(&want, &advertised));
+    give(&mut env, crate::shell_json::resolve_mint_json(result))
+}

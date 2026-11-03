@@ -32,7 +32,14 @@ public class MainActivity extends Activity {
     private TextView out;
     /** The buy button is disabled while a quote is outstanding: one attempt, one invoice. */
     private Button buy;
-    /** The quote being paid, if any. Kept so "Check payment" polls the same quote. */
+    /**
+     * The quote being paid, if any.
+     *
+     * Mirrored into SharedPreferences, not just held in memory: if the Activity
+     * is recreated (rotation, theme change, process death) after the user has
+     * paid the displayed BOLT11, an instance-only field would forget the quote
+     * and offer a *second* invoice for the same access — a real double charge.
+     */
     private String pendingQuote;
     private String pendingGate;
     /** Where the user may override the mint; blank means "ask the gateway". */
@@ -93,6 +100,13 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Restore an outstanding quote before the first tap can replace it.
+        pendingQuote = prefs().getString("pending_quote", null);
+        pendingGate = prefs().getString("pending_gate", null);
+        if (pendingQuote != null && !pendingQuote.isEmpty() && pendingGate != null) {
+            buy.setText("Check payment");
+        }
+
         mintField = new android.widget.EditText(this);
         mintField.setHint("mint URL (blank = use the gateway's own)");
         mintField.setText(prefs().getString("mint", ""));
@@ -106,8 +120,20 @@ public class MainActivity extends Activity {
             }
         });
 
+        Button abandon = new Button(this);
+        abandon.setText("Discard quote");
+        abandon.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clearPending();
+                buy.setText("Buy access (Lightning)");
+                out.setText("quote discarded; nothing was paid by this app");
+            }
+        });
+
         root.addView(scan);
         root.addView(buy);
+        root.addView(abandon);
         root.addView(mintField);
         root.addView(saveMint);
         root.addView(token);
@@ -189,17 +215,15 @@ public class MainActivity extends Activity {
         io.execute(new Runnable() {
             @Override
             public void run() {
-                // Ask the GATE which mints it accepts, then choose. The advert
-                // is the authority: a quote at a mint the gate does not accept
-                // is a guaranteed refusal, so this client never carries its own
-                // hardcoded mint default.
-                String mint = configured;
-                if (mint.isEmpty()) {
-                    String described = Core.describe(url);
-                    mint = firstMint(described);
-                }
+              try {
+                // The core resolves the mint: the advert is the authority, and
+                // `mint_choice` only honours an override the gate advertises.
+                // This used to scrape describe's JSON in Java, which read an
+                // empty mints array as the literal string "decision".
+                String resolved = Core.resolveMint(url, configured, 8000L);
+                final String mint = field(resolved, "mint");
                 if (mint == null || mint.isEmpty()) {
-                    final String msg = "no mint: set one, or the gateway advertises none";
+                    final String msg = "no mint: " + resolved;
                     ui.post(new Runnable() {
                         @Override
                         public void run() {
@@ -209,19 +233,20 @@ public class MainActivity extends Activity {
                     });
                     return;
                 }
-                final String chosen = mint;
-                final String json = Core.requestInvoice(url, 1L, chosen, 8000L);
+                final String json = Core.requestInvoice(url, 1L, mint, 8000L);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         buy.setEnabled(true);
                         String q = field(json, "quote");
-                        if (q == null) {
+                        // Empty as well as absent: a malformed or hostile gate
+                        // answering {"quote":""} would otherwise be remembered
+                        // as a live quote and poll a blank id forever.
+                        if (q == null || q.isEmpty()) {
                             out.setText("no quote:\n\n" + json.replace(",", ",\n"));
                             return;
                         }
-                        pendingQuote = q;
-                        pendingGate = url;
+                        rememberPending(q, url);
                         buy.setText("Check payment");
                         out.setText("pay this invoice ("
                                 + field(json, "amount") + " sat):\n\n"
@@ -229,8 +254,34 @@ public class MainActivity extends Activity {
                                 + "\n\nthen tap \"Check payment\".");
                     }
                 });
+              } finally {
+                // Any throw escaping here would otherwise leave the app's only
+                // purchase button disabled forever (and kill the process, since
+                // this is an executor thread). Expected gate errors arrive as
+                // JSON and are handled above; this is for the unexpected.
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        buy.setEnabled(true);
+                    }
+                });
+              }
             }
         });
+    }
+
+    /** Forget the outstanding quote, in memory and in prefs. */
+    private void clearPending() {
+        pendingQuote = null;
+        pendingGate = null;
+        prefs().edit().remove("pending_quote").remove("pending_gate").apply();
+    }
+
+    /** Remember the outstanding quote across Activity recreation. */
+    private void rememberPending(String quote, String gate) {
+        pendingQuote = quote;
+        pendingGate = gate;
+        prefs().edit().putString("pending_quote", quote).putString("pending_gate", gate).apply();
     }
 
     private void pollPending() {
@@ -246,8 +297,7 @@ public class MainActivity extends Activity {
                     public void run() {
                         buy.setEnabled(true);
                         if (json.contains("\"access_granted\":true")) {
-                            pendingQuote = null;
-                            pendingGate = null;
+                            clearPending();
                             buy.setText("Buy access (Lightning)");
                             out.setText("ACCESS GRANTED\n\n" + json.replace(",", ",\n"));
                         } else if (json.contains("\"retry\":true")) {
@@ -260,26 +310,6 @@ public class MainActivity extends Activity {
                 });
             }
         });
-    }
-
-    /**
-     * The first mint URL in a {@code describe} answer, or null.
-     *
-     * {@code describe} emits {@code "mints":["https://…","…"]}. This reads the
-     * first entry only: the gate lists the mints it accepts in advert order and
-     * any of them is payable, so picking the first is a choice, not a guess
-     * about which is "right".
-     */
-    private static String firstMint(String describeJson) {
-        if (describeJson == null) return null;
-        int i = describeJson.indexOf("\"mints\":[");
-        if (i < 0) return null;
-        int start = describeJson.indexOf('"', i + 9);
-        if (start < 0) return null;
-        int end = describeJson.indexOf('"', start + 1);
-        if (end < 0) return null;
-        String m = describeJson.substring(start + 1, end);
-        return m.isEmpty() ? null : m;
     }
 
     /**

@@ -51,7 +51,10 @@ pub fn choose_mint(override_url: &str, advertised: &[String]) -> Result<String, 
 /// `NormalizeMintURL`; this is the client's matching subset. It is deliberately
 /// conservative — it does not follow redirects, strip default ports, or
 /// normalise paths, because two different paths on one host are two mints.
-fn same_mint(a: &str, b: &str) -> bool {
+/// Exposed so callers that de-duplicate a list of advertised mints agree with
+/// the identity rule used to match them. Two spellings of one mint are one
+/// mint here, and must not become two entries in `describe`.
+pub fn same_mint(a: &str, b: &str) -> bool {
     fn norm(s: &str) -> String {
         let t = s.trim().trim_end_matches('/');
         // Split authority from path so only scheme+host are case-folded.

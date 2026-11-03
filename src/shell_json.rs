@@ -76,6 +76,54 @@ pub fn resolve_mint_json(result: Result<String, String>) -> String {
     }
 }
 
+/// JSON for `Core.renewalDecision(gateUrl, thresholdPct, dailyBudget, spentToday, cost)`.
+///
+/// One object the shell can act on without re-deriving anything:
+/// `{"action":"top-up|wait|blocked","why":…,"state":…,"remaining":…,"total":…}`.
+///
+/// `action` is the whole contract. A shell that buys on anything other than
+/// `"top-up"` — or that treats a missing `action` as permission — is the bug this
+/// shape exists to prevent, so every path returns one of the three strings.
+pub fn renewal_json(
+    reading: Result<crate::renewal::SessionReading, String>,
+    policy: &crate::renewal::RenewalPolicy,
+) -> String {
+    let reading = match reading {
+        Ok(r) => r,
+        // No reading is not a decision to buy. The gate being unreachable tells
+        // us nothing about whether the session needs topping up.
+        Err(e) => {
+            return format!(
+                r#"{{"action":"blocked","why":"cannot read the session: {}","state":"unknown","remaining":null,"total":null}}"#,
+                escape(&e)
+            )
+        }
+    };
+    let state = match reading.state {
+        crate::renewal::SessionState::None => "none",
+        crate::renewal::SessionState::Active => "active",
+        crate::renewal::SessionState::Expired => "expired",
+    };
+    let (remaining, total) = if reading.is_meterable() {
+        (reading.remaining().to_string(), reading.total.to_string())
+    } else {
+        ("null".to_string(), "null".to_string())
+    };
+    let (action, why) = match crate::renewal::decide(reading, policy) {
+        crate::renewal::RenewalDecision::TopUp { why } => ("top-up", why),
+        crate::renewal::RenewalDecision::Wait { .. } => ("wait", String::new()),
+        crate::renewal::RenewalDecision::Blocked { why } => ("blocked", why),
+    };
+    format!(
+        r#"{{"action":"{}","why":"{}","state":"{}","remaining":{},"total":{}}}"#,
+        action,
+        escape(&why),
+        state,
+        remaining,
+        total
+    )
+}
+
 /// A JSON string body must not be able to break the object it is embedded in.
 /// The gate's `error` text and a mint's quote id are both remote input.
 pub fn escape(s: &str) -> String {

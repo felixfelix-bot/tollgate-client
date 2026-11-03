@@ -40,6 +40,20 @@ public final class Core {
     public static native String resolveMint(String gateUrl, String overrideUrl, long timeoutMs);
 
     /**
+     * Should this client top up its session? Returns
+     * {@code {"action":"top-up|wait|blocked","why":…,"state":…,"remaining":…,"total":…}}.
+     *
+     * Only {@code "top-up"} authorises a purchase. {@code wait} means the session
+     * has headroom; {@code blocked} means something must not be bought — an
+     * in-flight purchase, the daily budget, or a client the gate cannot meter.
+     *
+     * @param thresholdPct top up when remaining falls to this percent (1-100)
+     * @param pending      true when a purchase is in flight or its outcome unknown
+     */
+    public static native String renewalDecision(String gateUrl, long thresholdPct,
+            long dailyBudget, long spentToday, long cost, boolean pending, long timeoutMs);
+
+    /**
      * Poll a quote for access. {@code {"state","access_granted","allotment","metric"}}.
      * {@code access_granted:true} is the only success signal; a
      * {@code paid-but-not-granted} answer means retry, never pay again.

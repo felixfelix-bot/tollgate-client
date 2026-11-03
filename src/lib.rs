@@ -41,6 +41,8 @@ pub mod netcfg;
 pub mod offline_policy;
 pub mod policy;
 pub mod purchase;
+/// When to top up an active session, as a pure decision.
+pub mod renewal;
 pub mod runner;
 pub mod scoring;
 #[cfg(feature = "persistence")]

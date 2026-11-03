@@ -1,7 +1,7 @@
 //! Android JNI: discovery, display-only caps, and an ABI-compatible buy refusal.
 use crate::policy::Caps;
 use jni::objects::{JClass, JString};
-use jni::sys::{jlong, jstring};
+use jni::sys::{jboolean, jlong, jstring};
 use jni::JNIEnv;
 use std::collections::HashMap;
 
@@ -173,4 +173,40 @@ pub extern "system" fn Java_dev_tollgate_client_Core_resolveMint(
     let result = crate::runner::advertised_mints(&url, timeout)
         .and_then(|advertised| crate::mint_choice::choose_mint(&want, &advertised));
     give(&mut env, crate::shell_json::resolve_mint_json(result))
+}
+
+/// `Core.renewalDecision(gateUrl, thresholdPct, dailyBudget, spentToday, cost)`
+/// — should this client top up, and if not, why not?
+///
+/// The decision itself lives in `renewal::decide`, pure and unit-tested, so the
+/// rule that is exercised by tests is the rule the phone runs. A pending
+/// purchase is passed by the shell because only the shell knows it.
+#[no_mangle]
+pub extern "system" fn Java_dev_tollgate_client_Core_renewalDecision(
+    mut env: JNIEnv,
+    _class: JClass,
+    gate_url: JString,
+    threshold_pct: jlong,
+    daily_budget: jlong,
+    spent_today: jlong,
+    cost: jlong,
+    pending: jboolean,
+    timeout_ms: jlong,
+) -> jstring {
+    let url = take(&mut env, &gate_url);
+    let timeout = timeout_ms.max(1000) as u64;
+    // A threshold given as a percentage (0-100) becomes a fraction. Values
+    // outside (0,1] are clamped rather than trusted: a 0 threshold would top up
+    // on every tick, and a >1 threshold would never top up at all.
+    let frac = (threshold_pct as f64 / 100.0).clamp(0.05, 1.0);
+    let policy = crate::renewal::RenewalPolicy {
+        top_up_below: frac,
+        min_top_up: 1,
+        daily_budget: daily_budget.max(0) as u64,
+        spent_today: spent_today.max(0) as u64,
+        cost: cost.max(0) as u64,
+        pending: pending != 0,
+    };
+    let reading = crate::runner::read_session(&url, timeout);
+    give(&mut env, crate::shell_json::renewal_json(reading, &policy))
 }

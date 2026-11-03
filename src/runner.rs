@@ -271,6 +271,43 @@ pub fn describe_gate(
     ))
 }
 
+/// Read this client's session: `/session-state` plus `/usage`.
+///
+/// Both are needed and neither is enough. `/session-state` says `none`/`active`/
+/// `expired` but carries no remaining amount, and its own docstring says why:
+/// "`-1/-1` is the same answer for a first-time visitor and for a customer whose
+/// paid session just ran out". `/usage` carries `<used>/<total>`. The renewal
+/// decision needs the pair.
+pub fn read_session(
+    gate_url: &str,
+    timeout_ms: u64,
+) -> Result<crate::renewal::SessionReading, String> {
+    let base = gate_url.trim_end_matches('/');
+    let state_url = format!("{base}/session-state");
+    let usage_url = format!("{base}/usage");
+
+    let (status, body) = http::request("GET", &state_url, None, timeout_ms)?;
+    if status != 200 {
+        return Err(format!("{state_url} answered HTTP {status}"));
+    }
+    let raw_state = crate::json::field_str(&body, "state").unwrap_or_default();
+    let state = crate::renewal::SessionState::parse(&raw_state).ok_or_else(|| {
+        // An unknown word must not silently become a known state: reading
+        // `none` out of garbage would buy a session that already exists.
+        format!("gate answered an unknown session state {raw_state:?}")
+    })?;
+
+    // A 200 with an unparseable body is not zero usage — it is no reading. The
+    // gate itself answers `-1/-1` when it cannot meter a client, and an
+    // unparseable body is the same information: unknown.
+    let (used, total) = match http::request("GET", &usage_url, None, timeout_ms) {
+        Ok((200, usage_body)) => crate::renewal::parse_usage(&usage_body).unwrap_or((-1, -1)),
+        _ => (-1, -1),
+    };
+
+    Ok(crate::renewal::SessionReading { state, used, total })
+}
+
 /// The mints a gate's advert names, trimmed and de-duplicated by mint identity.
 ///
 /// Fetches the advert itself rather than trusting a shell to have parsed it:

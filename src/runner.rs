@@ -4,8 +4,12 @@
 //! so this runs unchanged on a laptop, a VPS, or a router with a shell.
 
 use crate::agent::{attempt_purchase, AttemptResult, GateTransport, Journal, Wallet};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::bound_transport::{BoundTarget, Limits};
 use crate::discovery::parse_advertisement;
 use crate::http;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::net_bind::{BoundGet, NetworkSelection};
 use crate::policy::{decide, Caps};
 use crate::purchase::IntentState;
 use crate::scoring::{GatewayHistory, Offer};
@@ -200,6 +204,50 @@ pub fn describe_gate(
     if status != 200 {
         return Err(format!("{gate_url} answered HTTP {status}"));
     }
+    describe_body(gate_url, &body, caps, histories)
+}
+
+/// The same answer, with the advert fetched through the socket-binding seam.
+///
+/// This is the discovery half of the hardened path: the advert `GET` leaves from
+/// the caller's selected network, exactly like the payment `POST` and the session
+/// reads. A binding that cannot be attached is an error, never an unbound
+/// fallback. [`describe_gate`] remains the legacy LAN path and is **not** part of
+/// the hardened contract.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn describe_gate_bound(
+    selection: &NetworkSelection,
+    target: &BoundTarget,
+    limits: Limits,
+    caps: &Caps,
+    histories: &HashMap<String, crate::scoring::GatewayHistory>,
+) -> Result<String, String> {
+    let answer = BoundGet::new(selection.clone(), limits)
+        .read(target)
+        .map_err(|e| format!("advert GET {}: {e:?}", target.addr()))?;
+    if answer.status != 200 {
+        return Err(format!(
+            "{} answered HTTP {} on the advert GET",
+            target.addr(),
+            answer.status
+        ));
+    }
+    let body =
+        String::from_utf8(answer.body).map_err(|_| "advert body is not UTF-8".to_string())?;
+    describe_body(
+        &format!("http://{}{}", target.addr(), target.path()),
+        &body,
+        caps,
+        histories,
+    )
+}
+
+fn describe_body(
+    gate_url: &str,
+    body: &str,
+    caps: &Caps,
+    histories: &HashMap<String, crate::scoring::GatewayHistory>,
+) -> Result<String, String> {
     let kind = body
         .split("\"kind\":")
         .nth(1)
@@ -212,7 +260,7 @@ pub fn describe_gate(
                 .ok()
         })
         .ok_or_else(|| "advert body has no numeric kind".to_string())?;
-    let mut advert = parse_advertisement(kind, &extract_tags(&body)).map_err(|e| e.to_string())?;
+    let mut advert = parse_advertisement(kind, &extract_tags(body)).map_err(|e| e.to_string())?;
     advert.stamp_gateway(gate_url);
     let decision = decide(&advert.offers, histories, caps, None)?;
 

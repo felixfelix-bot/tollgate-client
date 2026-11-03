@@ -26,7 +26,7 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc,
     },
     thread,
@@ -176,6 +176,7 @@ impl Fixture {
             pay_target: BoundTarget::new_http(pay, "/").unwrap(),
             session_target: BoundTarget::new_http(session, "/session-state").unwrap(),
             context: Self::context(),
+            selection: None,
             limits: Self::limits(),
             poll: PollPolicy::new(3, Duration::from_millis(5)),
         }
@@ -1241,4 +1242,90 @@ fn genuine_refusals_still_classify_as_refusals() {
         );
         assert!(notice.is_none(), "{name}");
     }
+}
+
+// ------------------------------------------------- network-seam injection ----
+//
+// The purchase controller must use exactly one injected network selection for
+// every socket: the baseline read, the bounded polls and the POST. This binder
+// models the "wrong network selected" case (a captive Wi-Fi target while the
+// phone's default is cellular): it refuses to attach any socket at all.
+
+struct RefusingBinder {
+    binds: AtomicUsize,
+}
+
+impl tollgate_client_core::net_bind::NetworkBinder for RefusingBinder {
+    fn bind(
+        &self,
+        _socket: &socket2::Socket,
+    ) -> Result<(), tollgate_client_core::net_bind::BindError> {
+        self.binds.fetch_add(1, Ordering::SeqCst);
+        Err(tollgate_client_core::net_bind::BindError::Network {
+            kind: "wrong-network-test",
+            detail: "target is not on the selected network".into(),
+        })
+    }
+    fn link_intact(&self) -> bool {
+        false
+    }
+    fn generation(&self) -> u64 {
+        0
+    }
+    fn kind(&self) -> &'static str {
+        "wrong-network-test"
+    }
+    fn lost(&self) -> tollgate_client_core::net_bind::LostNetwork {
+        tollgate_client_core::net_bind::LostNetwork::Generation {
+            kind: "wrong-network-test",
+            generation: 0,
+        }
+    }
+}
+
+#[test]
+fn a_wrong_network_selection_sends_zero_posts_and_owns_no_exposure() {
+    let fixture = Fixture::new(10);
+    let (token, digest) = fixture.token("wrong-network", 2);
+    let mut adapter = fixture.enroll();
+    let harness = Harness::new(gate(GRANT, Arc::new(AtomicBool::new(false)), true));
+    let sink = EvidenceSink::open(fixture.root.join("evidence")).unwrap();
+
+    let binder = Arc::new(RefusingBinder {
+        binds: AtomicUsize::new(0),
+    });
+    let mut request = fixture.request(harness.addr, harness.addr, &digest, "wrong-network");
+    request.selection = Some(tollgate_client_core::net_bind::NetworkSelection::with(
+        Fixture::context(),
+        binder.clone(),
+    ));
+
+    let published = purchase_once(&mut adapter, &request, &sink).expect("purchase");
+    let report = harness.finish();
+
+    // Server-side observation is the evidence: no connection at all, because the
+    // baseline read refused before any socket was attached.
+    assert_eq!(report.connections, 0, "no socket reached the gate");
+    assert!(report.posts.is_empty(), "zero POST bodies");
+    assert!(
+        binder.binds.load(Ordering::SeqCst) >= 1,
+        "the injected binder was consulted"
+    );
+
+    // No trustworthy baseline means no send, and the ledger owns nothing.
+    assert_eq!(published.evidence.verdict, Verdict::Unresolved);
+    assert!(!published.evidence.send.attempted);
+    assert_eq!(published.evidence.send.delivery, "not_sent");
+    assert!(published
+        .evidence
+        .notes
+        .iter()
+        .any(|n| n == "no_trustworthy_baseline_no_send"));
+    assert_eq!(
+        published.evidence.baseline_error.as_deref(),
+        Some("network_lost")
+    );
+
+    // The token was provably never written, and the evidence never carries it.
+    read_evidence(&published.path, &token);
 }

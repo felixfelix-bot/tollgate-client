@@ -14,6 +14,15 @@
 //!    [`PolicyAdapter::attempt`], poll the session a bounded number of times, and
 //!    write one evidence record that never contains bearer bytes.
 //!
+//! # One network for the whole purchase
+//!
+//! Every socket — the baseline `GET`, the bounded polls and the `POST` — is
+//! created by [`crate::net_bind`], attached to the selection carried by
+//! [`PurchaseRequest::selection`]. `None` there means the platform default:
+//! `SO_BINDTODEVICE` on Linux, and a fail-closed refusal on Android until the
+//! shell injects a `Network` handle. A lost network refuses before the write and
+//! is ambiguous after it; see `docs/network-binding-seam.md`.
+//!
 //! # Why a pre-send refusal is recorded as `Unknown`
 //!
 //! [`crate::send_state::BudgetStore::send_validated`] commits the irreversible
@@ -52,7 +61,7 @@ mod wire_tests;
 use std::{
     fs::OpenOptions,
     io::{self, Read, Write},
-    net::{IpAddr, SocketAddr, TcpStream},
+    net::{IpAddr, TcpStream},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::{
@@ -64,13 +73,13 @@ use std::{
 
 use cdk::secp256k1::hashes::{sha256, Hash};
 use serde::{Serialize, Serializer};
-use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::{
     bound_transport::{
         AmbiguousReason, BoundTarget, BoundVerifiedBytesTransport, Limits, NetworkContext,
         RefusalReason, SendOutcome, VerifiedBytes,
     },
+    net_bind::{connect_bound, ensure_link, NetworkSelection},
     offline_policy::{Enrollment, PolicyAdapter},
     send_state::DeliveryObservation,
     token_vault::{ProtectedTokenVault, VaultRef},
@@ -178,6 +187,10 @@ pub enum SessionReadError {
     Oversized,
     /// A complete body that is not a JSON object with a string `state`.
     Malformed(&'static str),
+    /// The selected network could not be attached, or was lost before the write.
+    /// Never `"the session is not active"`: a refused binding is not an answer
+    /// from the gate.
+    NetworkLost,
 }
 
 impl SessionReadError {
@@ -205,6 +218,7 @@ impl SessionReadError {
             SessionReadError::TrailingBytes => "trailing_bytes",
             SessionReadError::Oversized => "oversized",
             SessionReadError::Malformed(_) => "malformed",
+            SessionReadError::NetworkLost => "network_lost",
         }
     }
 }
@@ -224,18 +238,37 @@ impl std::error::Error for SessionReadError {}
 /// binding, and it carries no body in either direction. It shares the *style*
 /// (numeric target, explicit source/interface, whole-request deadline, strict
 /// framing, typed outcome) without touching the reviewed send path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SessionReader {
     target: BoundTarget,
-    context: NetworkContext,
+    selection: NetworkSelection,
     limits: Limits,
 }
 
 impl SessionReader {
+    /// The platform default selection: `SO_BINDTODEVICE` on Linux, fail-closed
+    /// `NoNetwork` on Android until a handle is injected.
     pub fn new(target: BoundTarget, context: NetworkContext, limits: Limits) -> Self {
+        Self::with_selection(
+            target,
+            context.clone(),
+            limits,
+            NetworkSelection::default_for(context),
+        )
+    }
+
+    /// Inject the network selection explicitly. This is the Android seam's entry
+    /// point; every socket goes through it.
+    pub fn with_selection(
+        target: BoundTarget,
+        context: NetworkContext,
+        limits: Limits,
+        selection: NetworkSelection,
+    ) -> Self {
+        let _ = context;
         Self {
             target,
-            context,
+            selection,
             limits,
         }
     }
@@ -245,7 +278,12 @@ impl SessionReader {
     }
 
     pub fn context(&self) -> &NetworkContext {
-        &self.context
+        self.selection.context()
+    }
+
+    /// The network selection this reader will bind its socket to.
+    pub fn selection(&self) -> &NetworkSelection {
+        &self.selection
     }
 
     /// One `GET`, one response, one typed answer. Never retried here.
@@ -253,18 +291,19 @@ impl SessionReader {
         if self.target.path() != SESSION_PATH {
             return Err(SessionReadError::WrongPath);
         }
-        if self.context.interface().is_empty() {
+        let context = self.selection.context();
+        if context.interface().is_empty() {
             return Err(SessionReadError::InvalidContext("interface absent"));
         }
-        if self.context.source().is_unspecified() {
+        if context.source().is_unspecified() {
             return Err(SessionReadError::InvalidContext("source address absent"));
         }
-        if self.context.source().is_ipv4() != self.target.addr().is_ipv4() {
+        if context.source().is_ipv4() != self.target.addr().is_ipv4() {
             return Err(SessionReadError::AddressFamilyMismatch);
         }
 
         let deadline = Instant::now() + self.limits.total.min(Duration::from_secs(10));
-        let stream = self.connect(deadline)?;
+        let socket = self.connect(deadline)?;
 
         let request = format!(
             "GET {path} HTTP/1.1\r\n\
@@ -277,9 +316,14 @@ impl SessionReader {
             path = SESSION_PATH,
             host = self.target.addr(),
         );
-        self.write_request(&stream, request.as_bytes(), deadline)?;
+        self.write_request(socket.stream(), request.as_bytes(), deadline)?;
 
-        let (_status, body) = self.read_response(&stream, deadline)?;
+        // A session read never spends, so a link lost either side of the write is
+        // the same typed "no trustworthy session state" — never an empty session.
+        ensure_link(&socket, self.selection.binder().as_ref())
+            .map_err(|_| SessionReadError::NetworkLost)?;
+
+        let (_status, body) = self.read_response(socket.stream(), deadline)?;
         let raw_digest = sha256::Hash::hash(&body).to_string();
         let (state, allotment, metric) = parse_session_body(&body)?;
         Ok(SessionState {
@@ -320,45 +364,47 @@ impl SessionReader {
         Ok(())
     }
 
-    fn connect(&self, deadline: Instant) -> Result<TcpStream, SessionReadError> {
-        let domain = if self.target.addr().is_ipv4() {
-            Domain::IPV4
-        } else {
-            Domain::IPV6
-        };
-        let sock = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
-            .map_err(|e| SessionReadError::ConnectFailed(e.to_string()))?;
-        let _ = sock.set_tcp_nodelay(true);
-        // No unbound fallback: an unusable binding is an error, not a warning.
-        sock.bind_device(Some(self.context.interface().as_bytes()))
-            .map_err(|e| SessionReadError::ConnectFailed(e.to_string()))?;
-        sock.bind(&SocketAddr::new(self.context.source(), 0).into())
-            .map_err(|e| SessionReadError::ConnectFailed(e.to_string()))?;
+    fn connect(&self, deadline: Instant) -> Result<crate::net_bind::BoundSocket, SessionReadError> {
         let remaining = deadline
             .saturating_duration_since(Instant::now())
             .min(self.limits.connect);
         if remaining.is_zero() {
             return Err(SessionReadError::ConnectTimeout);
         }
-        match sock.connect_timeout(&self.target.addr().into(), remaining) {
-            Ok(()) => {}
-            Err(e) if is_timeout(&e) => return Err(SessionReadError::ConnectTimeout),
-            Err(e) => return Err(SessionReadError::ConnectFailed(e.to_string())),
-        }
-        let stream: TcpStream = sock.into();
-        // The socket must actually be on the bound source and on the intended
-        // peer before a single byte is written.
-        match stream.local_addr() {
-            Ok(local) if local.ip() == self.context.source() => {}
-            Ok(_) => return Err(SessionReadError::InvalidContext("source not bound")),
-            Err(e) => return Err(SessionReadError::ConnectFailed(e.to_string())),
-        }
-        match stream.peer_addr() {
-            Ok(peer) if peer == self.target.addr() => {}
-            Ok(_) => return Err(SessionReadError::InvalidContext("peer mismatch")),
-            Err(e) => return Err(SessionReadError::ConnectFailed(e.to_string())),
-        }
-        Ok(stream)
+        // The one socket-creation seam: attach, source-bind, connect, verify both
+        // endpoints. A binding that cannot be attached is `NetworkLost`, never an
+        // unbound socket and never "the session is not active".
+        let socket = connect_bound(
+            self.target.addr(),
+            self.selection.context(),
+            self.selection.binder().as_ref(),
+            remaining,
+        )
+        .map_err(|e| match e {
+            crate::net_bind::BindError::ConnectTimeout => SessionReadError::ConnectTimeout,
+            crate::net_bind::BindError::Connect(detail) => SessionReadError::ConnectFailed(detail),
+            crate::net_bind::BindError::SourceBind(detail) => {
+                SessionReadError::ConnectFailed(detail)
+            }
+            crate::net_bind::BindError::SourceMismatch { .. } => {
+                SessionReadError::InvalidContext("source not bound")
+            }
+            crate::net_bind::BindError::PeerMismatch { .. } => {
+                SessionReadError::InvalidContext("peer mismatch")
+            }
+            // Interface, network-handle and lost-link failures all mean "this
+            // socket is not on the selected network", which the caller must
+            // treat as no trustworthy session state.
+            crate::net_bind::BindError::Interface { .. }
+            | crate::net_bind::BindError::Network { .. }
+            | crate::net_bind::BindError::Lost(_) => SessionReadError::NetworkLost,
+        })?;
+
+        // Recheck the selection immediately after connecting and before the write:
+        // a network lost here refuses, it does not send and hope.
+        ensure_link(&socket, self.selection.binder().as_ref())
+            .map_err(|_| SessionReadError::NetworkLost)?;
+        Ok(socket)
     }
 
     fn read_response(
@@ -1411,8 +1457,25 @@ pub struct PurchaseRequest<'a> {
     pub pay_target: BoundTarget,
     pub session_target: BoundTarget,
     pub context: NetworkContext,
+    /// The network every socket for this purchase must leave from.
+    ///
+    /// `None` means "the platform default for `context`": `SO_BINDTODEVICE` on
+    /// Linux, and a fail-closed refusal on Android until the shell injects a
+    /// `Network` handle. Both the baseline read, the bounded polls and the POST
+    /// use this one selection, so no path can drift onto another network.
+    pub selection: Option<NetworkSelection>,
     pub limits: Limits,
     pub poll: PollPolicy,
+}
+
+impl PurchaseRequest<'_> {
+    /// The selection this purchase will use, without mutating the request.
+    fn network_selection(&self) -> NetworkSelection {
+        match &self.selection {
+            Some(selection) => selection.clone(),
+            None => NetworkSelection::default_for(self.context.clone()),
+        }
+    }
 }
 
 fn session_evidence(state: &SessionState) -> EvidenceSession {
@@ -1537,10 +1600,14 @@ pub fn purchase_once(
 
     let vault = ProtectedTokenVault::open(&request.vault_path)
         .map_err(|e| PurchaseError::Vault(e.to_string()))?;
-    let reader = SessionReader::new(
+    // One selection for the whole purchase: baseline, polls and POST cannot
+    // disagree about which network they leave from.
+    let selection = request.network_selection();
+    let reader = SessionReader::with_selection(
         request.session_target.clone(),
         request.context.clone(),
         request.limits,
+        selection.clone(),
     );
     let pay_digest = endpoint_digest(&request.pay_target);
     let session_digest = endpoint_digest(&request.session_target);
@@ -1620,7 +1687,8 @@ pub fn purchase_once(
                         request.pay_target.clone(),
                         request.context.clone(),
                         request.limits,
-                    ),
+                    )
+                    .with_selection(selection.clone()),
                     sink.clone(),
                     request.operation.clone(),
                     pay_digest.clone(),

@@ -27,12 +27,28 @@
 //! `crate::validated_send::VerifiedBytesTransport` / durable send ownership,
 //! session-evidence capture, and post-send route re-verification are caller
 //! (orchestration) concerns and are not implemented here.
+//!
+//! # The socket comes from the seam
+//!
+//! This transport no longer builds its own socket. Creation, network attachment,
+//! source bind, connect and endpoint verification all happen in
+//! [`crate::net_bind::connect_bound`], with the binder carried here. On Linux that
+//! is still `SO_BINDTODEVICE` on the context interface (see
+//! [`BoundVerifiedBytesTransport::new`]); on Android it is
+//! `android_setsocknetwork` on an injected `Network` handle
+//! ([`BoundVerifiedBytesTransport::with_binder`]), and with no handle injected the
+//! default refuses every send rather than leaving a socket unbound.
+//!
+//! A lost network refuses **before** the write and is [`AmbiguousReason`]
+//! **after** it, because the gate may already have consumed the token. See
+//! `docs/network-binding-seam.md`.
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use socket2::{Domain, Protocol, Socket, Type};
+use crate::net_bind::{connect_bound, ensure_link, refusal, NetworkBinder, NetworkSelection};
 
 /// Largest token body this transport will transmit. Pre-funded Cashu notes are
 /// small; anything near this bound is a programming error upstream.
@@ -231,7 +247,19 @@ pub enum RefusalReason {
         source: IpAddr,
     },
     InterfaceBindingFailed(String),
+    /// A platform network handle could not be attached to the socket
+    /// (`android_setsocknetwork`), or no handle was injected at all.
+    NetworkBindingFailed {
+        kind: &'static str,
+        detail: String,
+    },
     InterfaceVanished(String),
+    /// The selected network's link/generation was lost before the write. A
+    /// reused interface name or address is not the same network.
+    NetworkGenerationLost {
+        kind: &'static str,
+        generation: u64,
+    },
     SourceBindFailed(String),
     ConnectTimeout,
     ConnectFailed(String),
@@ -273,6 +301,14 @@ pub enum AmbiguousReason {
     ReadFailed(String),
     WriteTimeout,
     WriteFailed(String),
+    /// The bound interface disappeared after the request was written.
+    NetworkInterfaceLost(String),
+    /// The selected network's generation went away after the request was
+    /// written. The gate may have acted on the token.
+    NetworkGenerationLost {
+        kind: &'static str,
+        generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,19 +342,59 @@ fn ambiguous(reason: AmbiguousReason) -> SendOutcome {
 /// `send` takes `&self` and holds no interior mutability: a second call sends a
 /// second, independent request. There is no retry/backoff/redirect state to get
 /// wrong, and nothing to reconfigure between verification and write.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Every socket is created through [`crate::net_bind`], so the payment POST and
+/// the GET paths cannot disagree about which network they leave from.
+#[derive(Clone)]
 pub struct BoundVerifiedBytesTransport {
     target: BoundTarget,
     context: NetworkContext,
     limits: Limits,
+    binder: Arc<dyn NetworkBinder>,
+}
+
+impl std::fmt::Debug for BoundVerifiedBytesTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoundVerifiedBytesTransport")
+            .field("target", &self.target)
+            .field("context", &self.context)
+            .field("limits", &self.limits)
+            .field("binder", &self.binder.kind())
+            .finish()
+    }
 }
 
 impl BoundVerifiedBytesTransport {
+    /// The platform default for the context: `SO_BINDTODEVICE` on Linux,
+    /// fail-closed `NoNetwork` on Android until a handle is injected.
     pub fn new(target: BoundTarget, context: NetworkContext, limits: Limits) -> Self {
+        let selection = NetworkSelection::default_for(context.clone());
+        Self::with_binder(target, context, limits, selection.binder().clone())
+    }
+
+    /// Inject the binder explicitly. This is the Android seam's entry point; the
+    /// Linux regression tests use it too, to prove the default path is unchanged.
+    pub fn with_binder(
+        target: BoundTarget,
+        context: NetworkContext,
+        limits: Limits,
+        binder: Arc<dyn NetworkBinder>,
+    ) -> Self {
         Self {
             target,
             context,
             limits,
+            binder,
+        }
+    }
+
+    /// The same transport re-pointed at another injected binder.
+    pub fn with_selection(self, selection: NetworkSelection) -> Self {
+        Self {
+            target: self.target,
+            context: selection.context().clone(),
+            limits: self.limits,
+            binder: selection.binder().clone(),
         }
     }
 
@@ -332,6 +408,11 @@ impl BoundVerifiedBytesTransport {
 
     pub fn limits(&self) -> Limits {
         self.limits
+    }
+
+    /// The binder this transport will attach its socket to.
+    pub fn binder(&self) -> &Arc<dyn NetworkBinder> {
+        &self.binder
     }
 
     /// Send the verified bytes exactly once. Single attempt; there is no code
@@ -364,64 +445,21 @@ impl BoundVerifiedBytesTransport {
 
         let request = self.build_request(bytes);
 
-        let domain = if self.target.addr.is_ipv4() {
-            Domain::IPV4
-        } else {
-            Domain::IPV6
+        let socket = match connect_bound(
+            self.target.addr,
+            &self.context,
+            self.binder.as_ref(),
+            self.limits.connect,
+        ) {
+            Ok(socket) => socket,
+            Err(e) => return refused(refusal(e, &self.context)),
         };
-        let sock = match Socket::new(domain, Type::STREAM, Some(Protocol::TCP)) {
-            Ok(s) => s,
-            Err(e) => return refused(RefusalReason::ConnectFailed(e.to_string())),
-        };
-        let _ = sock.set_tcp_nodelay(true);
+        let stream = socket.stream();
 
-        // Interface binding must succeed; there is no unbound fallback.
-        if let Err(e) = sock.bind_device(Some(self.context.interface.as_bytes())) {
-            return refused(RefusalReason::InterfaceBindingFailed(e.to_string()));
-        }
-        if let Err(e) = sock.bind(&SocketAddr::new(self.context.source, 0).into()) {
-            return refused(RefusalReason::SourceBindFailed(e.to_string()));
-        }
-        match sock.connect_timeout(&self.target.addr.into(), self.limits.connect) {
-            Ok(()) => {}
-            Err(e)
-                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
-            {
-                return refused(RefusalReason::ConnectTimeout)
-            }
-            Err(e) => return refused(RefusalReason::ConnectFailed(e.to_string())),
-        }
-
-        let stream: TcpStream = sock.into();
-
-        // The socket must actually be on the bound source before any byte is
-        // written; a silently re-routed source is a refusal, not a warning.
-        match stream.local_addr() {
-            Ok(local) if local.ip() == self.context.source => {}
-            Ok(local) => {
-                return refused(RefusalReason::SourceAddressMismatch {
-                    expected: self.context.source,
-                    actual: local.ip(),
-                })
-            }
-            Err(e) => return refused(RefusalReason::SourceBindFailed(e.to_string())),
-        }
-        match stream.peer_addr() {
-            Ok(peer) if peer == self.target.addr => {}
-            Ok(peer) => {
-                return refused(RefusalReason::PeerAddressMismatch {
-                    expected: self.target.addr,
-                    actual: peer,
-                })
-            }
-            Err(e) => return refused(RefusalReason::ConnectFailed(e.to_string())),
-        }
-        // Best-effort post-connect recheck: interface disappearance before the
-        // write aborts. After the write this is only ever ambiguous.
-        if !std::path::Path::new(&format!("/sys/class/net/{}", self.context.interface)).exists() {
-            return refused(RefusalReason::InterfaceVanished(
-                self.context.interface.clone(),
-            ));
+        // The bound source and the intended peer were verified inside
+        // `connect_bound`; this recheck covers the selection itself.
+        if let Err(e) = ensure_link(&socket, self.binder.as_ref()) {
+            return refused(refusal(e, &self.context));
         }
 
         if let Err(e) = stream.set_write_timeout(Some(self.limits.write)) {
@@ -435,7 +473,7 @@ impl BoundVerifiedBytesTransport {
         }
 
         // ---- irreversible boundary: exactly one write_all, no retry ----
-        if let Err(e) = (&stream).write_all(&request) {
+        if let Err(e) = (&*stream).write_all(&request) {
             return ambiguous(match e.kind() {
                 io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => {
                     AmbiguousReason::WriteTimeout
@@ -444,7 +482,12 @@ impl BoundVerifiedBytesTransport {
             });
         }
 
-        match read_response(&stream, self.limits, deadline) {
+        // ---- loss after a possible write is ambiguous, never "not sent" ----
+        if let Err(e) = socket.recheck(self.binder.as_ref()) {
+            return ambiguous(crate::net_bind::ambiguous(e, &self.context));
+        }
+
+        match read_response(stream, self.limits, deadline) {
             Ok((status, body)) => SendOutcome::Complete { status, body },
             Err(reason) => ambiguous(reason),
         }
@@ -472,7 +515,7 @@ impl BoundVerifiedBytesTransport {
     }
 }
 
-fn read_response(
+pub(crate) fn read_response(
     stream: &TcpStream,
     limits: Limits,
     deadline: Instant,

@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# Minimal launcher for the TollGate module inside the lab VM.
+START=95
+USE_PROCD=1
+
+start_service() {
+	mkdir -p /etc/tollgate /opt/tg/bin
+	: > /tmp/ndsctl.log
+	procd_open_instance
+	procd_set_param command /opt/tg/tg
+	procd_set_param env NDSCTL_LOG=/tmp/ndsctl.log PATH=/usr/sbin:/usr/bin:/sbin:/bin
+	procd_set_param cwd /opt/tg
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param respawn 3600 5 5
+	procd_close_instance
+}

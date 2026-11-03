@@ -1,0 +1,21 @@
+test_legacy_buy_is_fixed_refusal_without_io (__main__.BoundaryTest.test_legacy_buy_is_fixed_refusal_without_io) ... FAIL
+
+======================================================================
+FAIL: test_legacy_buy_is_fixed_refusal_without_io (__main__.BoundaryTest.test_legacy_buy_is_fixed_refusal_without_io)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/c08r4d0r/worktrees/tc-android-hardened-payment/tests/android_jni_test.py", line 64, in test_legacy_buy_is_fixed_refusal_without_io
+    self.assertEqual(requests, ["GET"], f"JNI performed unexpected IO: {requests}")
+AssertionError: Lists differ: ['GET', 'GET', 'POST', 'GET', 'POST'] != ['GET']
+
+First list contains 4 additional elements.
+First extra element 1:
+'GET'
+
+- ['GET', 'GET', 'POST', 'GET', 'POST']
++ ['GET'] : JNI performed unexpected IO: ['GET', 'GET', 'POST', 'GET', 'POST']
+
+----------------------------------------------------------------------
+Ran 1 test in 2.141s
+
+FAILED (failures=1)

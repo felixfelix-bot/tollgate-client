@@ -1,0 +1,36 @@
+name: Android payment boundary
+on:
+  pull_request:
+  push:
+    branches: [main, pr/android-hardened-payment]
+jobs:
+  host-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # cdk 0.18.3 builds cdk-signatory protos; without protoc the hardened
+      # feature cannot even configure (verified on the first CI run).
+      - name: Install protoc (cdk build dependency)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Host hardened suite (private persistent temporary directory)
+        shell: bash
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/tollgate-private"
+          TMPDIR="$RUNNER_TEMP/tollgate-private" cargo test --locked --features android-hardened
+      - name: Real JNI refusal with full features
+        run: |
+          cargo build --locked --lib --no-default-features --features android-hardened
+          python3 tests/android_jni_test.py
+      - name: Discovery JNI and service regression
+        run: |
+          cargo build --locked --lib --no-default-features --features android
+          python3 tests/android_jni_test.py
+          python3 tests/android_service_test.py
+          python3 tests/android_build_test.py
+          cargo fmt --check

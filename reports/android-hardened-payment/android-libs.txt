@@ -1,0 +1,14 @@
+== aarch64
+f92cfec305644ad4fc8f59cfc776be07fe8e4a656c601a8db13de6496b046ee8  target/aarch64-linux-android/release/libtollgate_client_core.so
+ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, not stripped
+  0x0000000000000001 (NEEDED)       Shared library: [libdl.so]
+  0x0000000000000001 (NEEDED)       Shared library: [libc.so]
+3
+0
+== x86_64
+0913417403aec75370833cd35ac4f721e4d5f3e2b6d0b1a31a5428efec90b4c9  target/x86_64-linux-android/release/libtollgate_client_core.so
+ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, not stripped
+  0x0000000000000001 (NEEDED)       Shared library: [libdl.so]
+  0x0000000000000001 (NEEDED)       Shared library: [libc.so]
+3
+0

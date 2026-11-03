@@ -42,6 +42,12 @@ public class MainActivity extends Activity {
      */
     private String pendingQuote;
     private String pendingGate;
+    /** The BOLT11 the customer was told to pay, so a recreation can show it again. */
+    private String pendingInvoice;
+    /** The quote's price, kept so the resumed message reads the same as the first. */
+    private String pendingAmount;
+    /** True when onCreate restored a live quote, so it must not re-probe the gate. */
+    private boolean restored;
     /** Where the user may override the mint; blank means "ask the gateway". */
     private android.widget.EditText mintField;
 
@@ -103,8 +109,23 @@ public class MainActivity extends Activity {
         // Restore an outstanding quote before the first tap can replace it.
         pendingQuote = prefs().getString("pending_quote", null);
         pendingGate = prefs().getString("pending_gate", null);
+        pendingInvoice = prefs().getString("pending_invoice", null);
+        pendingAmount = prefs().getString("pending_amount", null);
         if (pendingQuote != null && !pendingQuote.isEmpty() && pendingGate != null) {
+            restored = true;
             buy.setText("Check payment");
+            // Restoring the button without the invoice it labels leaves the
+            // customer with "Check payment" over a blank box and nothing to
+            // pay — safe from a double charge, but unusable. Show the same
+            // BOLT11 again; if the invoice was never stored, say so instead of
+            // pretending, and let Discard quote clear the stale id.
+            if (pendingInvoice != null && !pendingInvoice.isEmpty()) {
+                out.setText(invoicePrompt(pendingAmount, pendingInvoice));
+            } else {
+                out.setText("a quote is already open, but its invoice is not on this"
+                        + " device — tap \"Check payment\" if you have paid it, or"
+                        + " \"Discard quote\" to ask the gateway for a new one.");
+            }
         }
 
         mintField = new android.widget.EditText(this);
@@ -145,6 +166,13 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
+        // A resumed quote owns the screen. checkGateway() writes "probing …"
+        // into the same TextView, so running it here would erase the invoice
+        // the customer came back for — the exact blank-box state this restore
+        // exists to prevent.
+        if (restored) {
+            return;
+        }
         checkGateway();
     }
 
@@ -246,12 +274,9 @@ public class MainActivity extends Activity {
                             out.setText("no quote:\n\n" + json.replace(",", ",\n"));
                             return;
                         }
-                        rememberPending(q, url);
+                        rememberPending(q, url, field(json, "invoice"), field(json, "amount"));
                         buy.setText("Check payment");
-                        out.setText("pay this invoice ("
-                                + field(json, "amount") + " sat):\n\n"
-                                + field(json, "invoice")
-                                + "\n\nthen tap \"Check payment\".");
+                        out.setText(invoicePrompt(field(json, "amount"), field(json, "invoice")));
                     }
                 });
               } finally {
@@ -274,14 +299,33 @@ public class MainActivity extends Activity {
     private void clearPending() {
         pendingQuote = null;
         pendingGate = null;
-        prefs().edit().remove("pending_quote").remove("pending_gate").apply();
+        pendingInvoice = null;
+        pendingAmount = null;
+        prefs().edit().remove("pending_quote").remove("pending_gate")
+                .remove("pending_invoice").remove("pending_amount").apply();
     }
 
     /** Remember the outstanding quote across Activity recreation. */
-    private void rememberPending(String quote, String gate) {
+    private void rememberPending(String quote, String gate, String invoice, String amount) {
         pendingQuote = quote;
         pendingGate = gate;
-        prefs().edit().putString("pending_quote", quote).putString("pending_gate", gate).apply();
+        pendingInvoice = invoice;
+        pendingAmount = amount;
+        prefs().edit().putString("pending_quote", quote).putString("pending_gate", gate)
+                .putString("pending_invoice", invoice).putString("pending_amount", amount)
+                .apply();
+    }
+
+    /**
+     * The one place the "pay this" message is worded.
+     *
+     * First issue and post-rotation resume must read identically, or a customer
+     * who rotated cannot tell the invoice they are looking at is the same one.
+     */
+    private static String invoicePrompt(String amount, String invoice) {
+        return "pay this invoice (" + (amount == null ? "" : amount) + " sat):\n\n"
+                + invoice
+                + "\n\nthen tap \"Check payment\".";
     }
 
     private void pollPending() {

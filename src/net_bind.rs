@@ -12,7 +12,20 @@
 //! the caller's [`NetworkContext`] (source address + interface label) and a
 //! binder; [`connect_bound`] creates the socket, asks the binder to attach it,
 //! source-binds, connects, and then verifies the two endpoints that the kernel
-//! actually produced. Nothing else in the crate creates a gate socket.
+//! actually produced.
+//!
+//! Scope of the claim, exactly: everything in the **hardened** contract creates
+//! its socket here — `BoundVerifiedBytesTransport` (the payment `POST`),
+//! `SessionReader` (the baseline read, the bounded polls and the post-grant
+//! probe) and [`BoundGet`] (the advert read used by
+//! `runner::describe_gate_bound`). The **legacy** discovery path is not on the
+//! seam: `crate::http::request` still opens an unbound `TcpStream`, and
+//! `runner::describe_gate`, `runner::run_once`, `HttpGate` and the
+//! `Core.describe` JNI export all call it. Those are the pre-hardening LAN
+//! paths and remain unbound on purpose — rewiring them is a separate change,
+//! and until it lands the Android shell's discovery `GET` is **not** covered by
+//! this seam. Do not read "the hardened path is bound" as "every socket in the
+//! crate is bound".
 //!
 //! Two platform binders ship here:
 //!

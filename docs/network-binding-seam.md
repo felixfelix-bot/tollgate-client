@@ -1,9 +1,19 @@
 # The injectable network-binding seam
 
-`net_bind` is the **one** place in this crate where a gate socket is attached to a
-network. Advert `GET`, session-state `GET`, the payment `POST` and the
-post-grant session probe all create their socket here, so no request path can
-leave from a different network than the others.
+`net_bind` is the **one** place in this crate where a **hardened** gate socket is
+attached to a network. Advert `GET` (via `runner::describe_gate_bound`),
+session-state `GET`, the payment `POST` and the post-grant session probe all
+create their socket here, so no hardened request path can leave from a different
+network than the others.
+
+**Scope, precisely.** `crate::http::request` also still exists and still opens a
+plain unbound `TcpStream`. It is the **legacy LAN** transport, used by
+`runner::describe_gate`, `runner::run_once`, `HttpGate` and therefore the
+`Core.describe` JNI export. Those call sites are deliberately unchanged in this
+change and are **not** on the seam. The practical consequence today: the Android
+shell's discovery `GET` is unbound; only the hardened purchase path is bound.
+Rewiring the legacy discovery export onto the seam is a separate change with its
+own tests — do not read this document as claiming it is already done.
 
 Requires `cdk` + `persistence` on Linux/Android for the purchase path; the seam
 itself is compiled on both targets. Lab-free: every test binds a loopback
@@ -117,6 +127,14 @@ Named plainly, because a green host suite must not be read as an Android claim:
    plus the pre/post link checks, not a measured per-packet observation.
 5. **Real payment.** No router, mint, QEMU or funds are involved in any test in
    this document.
+6. **The legacy discovery path is still unbound.** `Core.describe` →
+   `runner::describe_gate` → `http::request` creates a plain `TcpStream` with no
+   binder. So on Android today the *discovery* `GET` can still leave over the
+   default route; only the hardened purchase path (advert read through
+   `describe_gate_bound`, session reads, `POST`, post-grant probe) is attached to
+   the selected network. Wiring the legacy export is the next card, and it needs
+   a binder in the JNI signature — which needs the Java `Network` capture that
+   does not exist yet.
 
 ## Tests (`tests/network_seam.rs`)
 
@@ -132,6 +150,7 @@ Named plainly, because a green host suite must not be read as an Android claim:
 | `the_android_binder_refuses_unspecified_and_fails_closed_on_host` | handle `0` rejected; host lacks libandroid so the POST refuses with 0 connections |
 | `the_android_entry_point_carries_a_handle_and_its_link` | handle + link carried; `mark_lost` is irreversible |
 | `the_linux_default_selection_still_binds_the_device` | the Linux default still binds the device and still fails closed on a missing interface |
+| `the_legacy_discovery_path_is_still_outside_the_seam` | **pins the known gap**: both paths reach the gate (2 connections), the binder is consulted once — the legacy discovery `GET` is unbound |
 
 `tests/capped_purchase.rs::a_wrong_network_selection_sends_zero_posts_and_owns_no_exposure`
 is the orchestration-level counterpart: with a binder that refuses to attach,

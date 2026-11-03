@@ -241,10 +241,14 @@ Evidence is the **server's** observation from a loopback listener in
   `unresolved import tollgate_client_core::net_bind`.
   `milestone-2-red.log` covers the second wave (production wiring stashed, tests kept):
   `cannot find net_bind`, `cannot find describe_gate_bound`.
+  `milestone-2-legacy-gap-red.log` covers the independent-audit finding: the legacy
+  discovery `GET` reaches the gate without consulting the binder (`bind_calls 1`, not 2).
 - **Gate 2 (GREEN).** `cargo test --locked --features android-hardened` under
   `umask 077; TMPDIR=/var/tmp/tollgate-private-be8d64b8` (private root, not `$HOME`):
-  **191 passed, 0 failed, 0 ignored** across 25 test binaries
-  (`milestone-2-tests.log`). `tests/network_seam.rs`: 10/10.
+  **192 passed, 0 failed, 0 ignored** across 25 test binaries
+  (`milestone-2-tests.log`). `tests/network_seam.rs`: 11/11.
+  Default features: 96 passed. Discovery-only lib
+  (`--no-default-features --features android`) builds.
 - **Gate 3 (docs).** `docs/network-binding-seam.md` + updated module docs in
   `src/net_bind.rs`, `src/bound_transport.rs`, `src/capped_purchase.rs`; this section.
 - **Gate 4 (commits).** One concern per commit, conventional messages, clean tree.
@@ -271,3 +275,8 @@ Evidence is the **server's** observation from a loopback listener in
    "the response arrived over the bound network" is still an inference from a verified
    `peer_addr`/`local_addr` pair plus pre/post link checks, not a per-packet measurement.
 5. **Real payment.** No router, mint, QEMU or funds appear in any test here.
+6. **The legacy discovery path is unbound.** `Core.describe` →
+   `runner::describe_gate` → `http::request` still opens a plain `TcpStream` with
+   no binder, so the Android shell's *discovery* `GET` can leave over the default
+   route. Only the hardened purchase path is on the seam. Claims in this report
+   about "every request path" mean every **hardened** request path.

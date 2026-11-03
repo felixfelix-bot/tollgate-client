@@ -210,15 +210,19 @@ Limits: structural validation is NOT issuer/DLEQ authentication, spend-state kno
 ## Android network-binding seam (milestone 2, part A)
 
 - Added `src/net_bind.rs`: one injectable seam (`NetworkBinder`, `NetworkSelection`,
-  `BoundSocket`, `BoundGet`, `connect_bound`) that every gate socket now goes through —
-  advert `GET`, session-state `GET`, payment `POST` and the post-grant probe.
+  `BoundSocket`, `BoundGet`, `connect_bound`) that every **hardened** gate socket now goes
+  through — advert `GET` (via `describe_gate_bound`), session-state `GET`, payment `POST`
+  and the post-grant probe. Scope is pinned by test, not prose: the legacy discovery path
+  (`Core.describe` → `runner::describe_gate` → `http::request`) is still unbound and
+  `the_legacy_discovery_path_is_still_outside_the_seam` fails the day that changes.
 - Android path calls `android_setsocknetwork(Network.getNetworkHandle(), fd)`; Linux keeps
   `SO_BINDTODEVICE` byte-for-byte and is regression-tested.
 - Fail-closed rules are structural: no process-wide bind, no unbound fallback, no retry or
   redirect. A lost network refuses before the write and is ambiguous after it.
-- `tests/network_seam.rs` (10 tests) asserts on what the loopback server observed, not on
+- `tests/network_seam.rs` (11 tests) asserts on what the loopback server observed, not on
   client return values: 4 connections for 4 paths on one seam, and 0 connections / 0 POST
   bodies on every refusal.
-- Full host suite green: 191 tests across 25 binaries, `--features android-hardened`.
+- Full host suite green: 192 tests across 25 binaries, `--features android-hardened`
+  (default features: 96). Independently re-run, not carried over from the first attempt.
 - Unproven and stated as such: the platform call on a device, the Java `Network` capture
   (follow-up card), and any real payment. No device or funds involved.

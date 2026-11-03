@@ -1,0 +1,50 @@
+RED: the legacy discovery path is measured outside the seam.
+
+Why this exists: `src/net_bind.rs` and `docs/network-binding-seam.md` claimed
+"nothing else in the crate creates a gate socket". That is false --
+`crate::http::request` still opens a plain unbound `TcpStream`, and the legacy
+discovery call sites (`runner::describe_gate`, `runner::run_once`, `HttpGate`,
+and therefore the `Core.describe` JNI export) use it. An independent audit of
+the branch found the overclaim, so it was corrected and pinned by a test.
+
+The probe below asserts the *desired* state (both the hardened advert GET and
+the legacy discovery GET consult the binder). It fails, which is the finding:
+the legacy GET reaches the gate without ever consulting the binder.
+
+$ cargo test --locked --features android-hardened --test network_seam
+   (private TMPDIR=/var/tmp/tollgate-private-be8d64b8, umask 077)
+
+running 11 tests
+test the_android_entry_point_carries_a_handle_and_its_link ... ok
+test a_network_lost_after_the_write_is_ambiguous ... ok
+test the_android_binder_refuses_unspecified_and_fails_closed_on_host ... ok
+test a_network_lost_before_the_write_boundary_refuses_the_post ... ok
+test a_refused_network_bind_sends_nothing_on_any_path ... ok
+test no_injected_android_network_refuses_every_path ... ok
+test the_legacy_discovery_path_is_still_outside_the_seam ... FAILED
+test a_network_lost_before_the_read_is_typed_not_an_empty_session ... ok
+test the_linux_default_selection_still_binds_the_device ... ok
+test the_advert_get_path_prices_the_body_and_refuses_without_a_network ... ok
+test the_same_seam_carries_advert_get_session_get_post_and_probe ... ok
+
+failures:
+
+---- the_legacy_discovery_path_is_still_outside_the_seam stdout ----
+
+thread 'the_legacy_discovery_path_is_still_outside_the_seam' (1194584) panicked at tests/network_seam.rs:732:5:
+assertion `left == right` failed: RED probe: both paths should consult the binder
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+Reading the numbers: `connections == 2` passed before this assertion, so BOTH
+the hardened advert GET and the legacy discovery GET did reach the loopback
+gate. Only one of them (the hardened one) consulted the binder. The legacy path
+therefore sends over the default route with no network binding at all.
+
+The assertion was then flipped to pin the measured reality (`bind_calls() == 1`)
+so the gap is guarded rather than re-claimed in prose. When a follow-up card
+puts the legacy discovery export on the seam, this test must be rewritten to
+assert the binder was consulted -- not deleted.

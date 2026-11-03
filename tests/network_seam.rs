@@ -681,3 +681,57 @@ fn the_android_entry_point_carries_a_handle_and_its_link() {
     assert!(!sel.binder().link_intact());
     assert!(NetworkSelection::android_network(context(), 0, link).is_err());
 }
+
+/// **Known gap, pinned deliberately.** The legacy discovery path
+/// (`runner::describe_gate` → `http::request`, and therefore the `Core.describe`
+/// JNI export) does **not** go through the seam: it opens a plain `TcpStream`
+/// with no binder. This test records that as the measured state rather than
+/// leaving `docs/network-binding-seam.md` free to claim otherwise.
+///
+/// It is a tripwire, not an endorsement. When the follow-up card puts the legacy
+/// discovery export on the seam, this test must fail — and the card must then
+/// replace it with one asserting the binder was consulted. Do not "fix" it by
+/// deleting the assertion.
+#[test]
+fn the_legacy_discovery_path_is_still_outside_the_seam() {
+    let harness = Harness::new();
+    let binder = FakeBinder::new(0x9999_aaaa_bbbb_cccc);
+    let sel = selection(binder.clone());
+
+    // The hardened advert read is on the seam ...
+    BoundGet::new(sel.clone(), limits())
+        .read(&BoundTarget::new_http(harness.addr, "/").unwrap())
+        .expect("hardened advert GET");
+    assert_eq!(binder.bind_calls(), 1, "hardened advert GET used the seam");
+
+    // ... and the legacy discovery read is not, even though it reaches the same
+    // server. If this ever starts consulting the binder, the follow-up card has
+    // landed and this pin must be updated with it.
+    let caps = tollgate_client_core::policy::Caps {
+        preferred_unit: "sat".into(),
+        max_cost_per_minute: 120.0,
+        daily_budget: 100.0,
+        spent_today: 0.0,
+        switch_margin: 0.20,
+    };
+    let url = format!("http://{}/", harness.addr);
+    // `describe_gate` rejects a bare "advert" body, but it still opened the
+    // socket — which is the fact under test. The error is expected and ignored.
+    let _ = tollgate_client_core::runner::describe_gate(
+        &url,
+        &caps,
+        &std::collections::HashMap::new(),
+        2_000,
+    );
+    let report = harness.finish();
+    assert_eq!(
+        report.connections, 2,
+        "both paths reach the gate: {:?}",
+        report.methods
+    );
+    assert_eq!(
+        binder.bind_calls(),
+        1,
+        "the legacy discovery GET did NOT consult the binder — this is the documented gap"
+    );
+}

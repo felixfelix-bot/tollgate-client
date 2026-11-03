@@ -1,4 +1,12 @@
-*.apk
-*.idsig
-/target
-Cargo.lock.bak
+/artifacts/
+/evidence/*.png
+/tollgate-android.apk
+/reports-apk-build.log
+/qemu-lab/*.qcow2
+/qemu-lab/serial.sock
+/qemu-lab/qemu.pid
+/target/
+/tollgate-android.apk.idsig
+/qemu-lab/*.log
+/qemu-lab/qemu.err
+/qemu-lab/qemu.out

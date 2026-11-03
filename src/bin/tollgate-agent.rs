@@ -222,7 +222,14 @@ fn main() -> ExitCode {
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("usage: tollgate-agent --gate <url> --token-file <path> --journal <path> --attempt-id <id> \
-[--max-cost-per-minute N] [--daily-budget N] [--spent-today N] [--unit sat] [--timeout-ms N]");
+[--max-cost-per-minute N] [--daily-budget N] [--spent-today N] [--unit sat] [--timeout-ms N]\n\
+       tollgate-agent --lightning --gate <url> --journal <path> --attempt-id <id>\n\
+\n\
+lanes:\n\
+  --lightning        buy with a BOLT11 invoice; needs no wallet or token file\n\
+                     (equivalent to TOLLGATE_MODE=lightning, which the packaged\n\
+                     service uses so it can run without a token file)\n\
+  (default)          pay with a Cashu token via --token-file");
         return ExitCode::SUCCESS;
     }
 

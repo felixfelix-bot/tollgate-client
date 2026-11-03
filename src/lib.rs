@@ -31,6 +31,9 @@ pub mod json;
 mod ledger_storage;
 pub mod lightning;
 mod mint_identity;
+/// The injectable socket-binding seam shared by every gate request path.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub mod net_bind;
 pub mod netcfg;
 #[cfg(all(
     feature = "cdk",

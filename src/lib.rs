@@ -30,6 +30,7 @@ pub mod json;
 #[cfg(feature = "persistence")]
 mod ledger_storage;
 pub mod lightning;
+pub mod mint_choice;
 mod mint_identity;
 pub mod netcfg;
 #[cfg(all(
@@ -44,6 +45,8 @@ pub mod runner;
 pub mod scoring;
 #[cfg(feature = "persistence")]
 pub mod send_state;
+/// The JSON contract the Android shell parses for the Lightning lane.
+pub mod shell_json;
 #[cfg(all(feature = "cdk", any(target_os = "linux", target_os = "android")))]
 pub mod token_vault;
 #[cfg(all(

@@ -1,7 +1,7 @@
 //! Android JNI: discovery, display-only caps, and an ABI-compatible buy refusal.
 use crate::policy::Caps;
 use jni::objects::{JClass, JString};
-use jni::sys::jstring;
+use jni::sys::{jlong, jstring};
 use jni::JNIEnv;
 use std::collections::HashMap;
 
@@ -102,4 +102,53 @@ pub extern "system" fn Java_dev_tollgate_client_Core_capsFor(
         &mut env,
         serde_json::to_string(&out).expect("display caps are serializable"),
     )
+}
+
+// ---------------------------------------------------------------------------
+// The Lightning lane: the phone buys without holding a wallet.
+//
+// The token lane needs a Cashu note on the device, which means a wallet, a
+// seed, and durable spend state — the parts this build deliberately does not
+// have. The Lightning lane needs none of that: the gate creates the invoice,
+// the customer pays it in any Lightning wallet, and the gate grants access on
+// its own. Two calls, so the UI can show the invoice while it is being paid
+// instead of blocking on a synchronous pay step that does not exist here.
+// ---------------------------------------------------------------------------
+
+/// `Core.requestInvoice(gateUrl, amountSat, mintUrl, timeoutMs)` — ask the gate
+/// to create a quote. Returns `{quote,invoice,amount,mint_url,expiry}` or
+/// `{error}`; the BOLT11 is what the customer pays.
+#[no_mangle]
+pub extern "system" fn Java_dev_tollgate_client_Core_requestInvoice(
+    mut env: JNIEnv,
+    _class: JClass,
+    gate_url: JString,
+    amount_sat: jlong,
+    mint_url: JString,
+    timeout_ms: jlong,
+) -> jstring {
+    let url = take(&mut env, &gate_url);
+    let mint = take(&mut env, &mint_url);
+    let amount = amount_sat.max(1) as u64;
+    let timeout = timeout_ms.max(1000) as u64;
+    let result = crate::lightning::request_invoice(&url, amount, &mint, timeout);
+    give(&mut env, crate::shell_json::request_invoice_json(result))
+}
+
+/// `Core.pollInvoice(gateUrl, quote, timeoutMs)` — has the gate granted yet?
+/// `access_granted:true` is the ONLY field that means "you are online"; a
+/// `paid-but-not-granted` answer is a retry, never a second payment.
+#[no_mangle]
+pub extern "system" fn Java_dev_tollgate_client_Core_pollInvoice(
+    mut env: JNIEnv,
+    _class: JClass,
+    gate_url: JString,
+    quote: JString,
+    timeout_ms: jlong,
+) -> jstring {
+    let url = take(&mut env, &gate_url);
+    let quote = take(&mut env, &quote);
+    let timeout = timeout_ms.max(1000) as u64;
+    let result = crate::lightning::poll_status(&url, &quote, timeout);
+    give(&mut env, crate::shell_json::poll_invoice_json(result))
 }
